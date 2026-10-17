@@ -1,0 +1,11 @@
+{
+  "domain": "fluentpet",
+  "name": "FluentPet Connect",
+  "codeowners": ["@CleverPet"],
+  "documentation": "https://github.com/CleverPet/fluentpet-homeassistant",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/CleverPet/fluentpet-homeassistant/issues",
+  "requirements": [],
+  "version": "0.0.1"
+}

@@ -1,0 +1,26 @@
+{
+  "data": [
+    {
+      "id": "base_testbaseoneaaaaaaaaaaaaaaa",
+      "serial": "TESTSERIAL0001",
+      "name": "Test Base",
+      "fw_version": "2.4.20260901",
+      "model": "connect-base",
+      "connected": true,
+      "last_online_at": "2026-10-17T12:00:00.000Z",
+      "power_mode": "plugged_in",
+      "battery_level": 100
+    },
+    {
+      "id": "base_testbasetwoaaaaaaaaaaaaaaa",
+      "serial": "TESTSERIAL0002",
+      "name": null,
+      "fw_version": null,
+      "model": null,
+      "connected": false,
+      "last_online_at": "2026-10-17T11:45:00.000Z",
+      "power_mode": "battery",
+      "battery_level": 62
+    }
+  ]
+}

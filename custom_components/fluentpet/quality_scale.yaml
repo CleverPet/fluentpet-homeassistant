@@ -1,0 +1,96 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: The integration does not register service actions.
+  appropriate-polling:
+    status: done
+    comment: Events are pushed by webhook; the event feed and the Bases (last seen, power mode, battery level) are read every 30 seconds by default (configurable 10 to 3600) so no event is missed, with backoff on rate limits and server errors and Retry-After honored.
+  brands:
+    status: done
+    comment: Brand folder from the official FluentPet symbol and the 2022 joined logo
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: todo
+    comment: API client vendored in custom_components/fluentpet/fluentpet_api until fluentpet-api is published to PyPI (CleverPet/fluentpet-api)
+  docs-actions:
+    status: exempt
+    comment: The integration does not register service actions.
+  docs-conditions:
+    status: exempt
+    comment: The integration does not provide conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: The integration does not provide triggers; button presses are event entities.
+  entity-event-setup:
+    status: done
+    comment: Event and sensor entities subscribe to dispatcher signals in async_added_to_hass and unsubscribe with async_on_remove.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: The integration does not register service actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable:
+    status: done
+    comment: Last seen sensors follow coordinator.last_update_success; press and last interaction entities are unavailable while refreshes fail and the webhook is not active, and apply events held meanwhile once available.
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery-update-info:
+    status: exempt
+    comment: Cloud service; there is nothing to discover on the network.
+  discovery:
+    status: exempt
+    comment: Cloud service; there is nothing to discover on the network.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices: done
+  entity-category:
+    status: exempt
+    comment: Every entity is primary; none is configuration or diagnostic.
+  entity-device-class:
+    status: done
+    comment: Press entities use the button event device class and last seen sensors the timestamp sensor device class; the last interaction sensor is text and has none.
+  entity-disabled-by-default:
+    status: exempt
+    comment: There are no noisy or rarely used entities.
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow:
+    status: exempt
+    comment: The household is the only setting and is the unique id; options cover the rest.
+  repair-issues:
+    status: done
+    comment: Issues for an auto-disabled webhook, the household webhook limit and lost household admin access; each goes away on its own once resolved.
+  stale-devices: done
+
+  # Platinum
+  async-dependency: done
+  inject-websession: done
+  strict-typing: done

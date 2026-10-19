@@ -1,7 +1,10 @@
 {
   "domain": "fluentpet",
   "name": "FluentPet Connect",
+  "after_dependencies": ["cloud"],
   "codeowners": ["@CleverPet"],
+  "config_flow": true,
+  "dependencies": ["application_credentials", "http", "webhook"],
   "documentation": "https://github.com/CleverPet/fluentpet-homeassistant",
   "integration_type": "hub",
   "iot_class": "cloud_push",

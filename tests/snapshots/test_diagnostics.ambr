@@ -1,0 +1,115 @@
+# serializer version: 1
+# name: test_diagnostics
+  dict({
+    'custom_api_base_url': False,
+    'data': dict({
+      'bases': dict({
+        'base_testbaseoneaaaaaaaaaaaaaaa': dict({
+          'battery_level': 100,
+          'connected': True,
+          'fw_version': '2.4.20260901',
+          'id': 'base_testbaseoneaaaaaaaaaaaaaaa',
+          'last_online_at': '2026-10-17T12:00:00+00:00',
+          'model': 'connect-base',
+          'name': '**REDACTED**',
+          'power_mode': 'plugged_in',
+          'serial': '**REDACTED**',
+        }),
+        'base_testbasetwoaaaaaaaaaaaaaaa': dict({
+          'battery_level': 62,
+          'connected': False,
+          'fw_version': None,
+          'id': 'base_testbasetwoaaaaaaaaaaaaaaa',
+          'last_online_at': '2026-10-17T11:45:00+00:00',
+          'model': None,
+          'name': None,
+          'power_mode': 'battery',
+          'serial': '**REDACTED**',
+        }),
+      }),
+      'buttons': dict({
+        'btn_testbuttonoutsideaaaaaaaaa': dict({
+          'audio_id': '**REDACTED**',
+          'base_id': 'base_testbaseoneaaaaaaaaaaaaaaa',
+          'id': 'btn_testbuttonoutsideaaaaaaaaa',
+          'name': '**REDACTED**',
+          'normalized_word': '**REDACTED**',
+          'serial': '**REDACTED**',
+        }),
+        'btn_testbuttonplayaaaaaaaaaaaa': dict({
+          'audio_id': None,
+          'base_id': 'base_testbaseoneaaaaaaaaaaaaaaa',
+          'id': 'btn_testbuttonplayaaaaaaaaaaaa',
+          'name': '**REDACTED**',
+          'normalized_word': '**REDACTED**',
+          'serial': '**REDACTED**',
+        }),
+        'btn_testbuttonwalkaaaaaaaaaaaa': dict({
+          'audio_id': None,
+          'base_id': None,
+          'id': 'btn_testbuttonwalkaaaaaaaaaaaa',
+          'name': '**REDACTED**',
+          'normalized_word': '**REDACTED**',
+          'serial': None,
+        }),
+      }),
+      'learners': dict({
+        'psh_testlearneraaaaaaaaaaaaaaa': dict({
+          'id': 'psh_testlearneraaaaaaaaaaaaaaa',
+          'name': '**REDACTED**',
+          'type': 'learner',
+        }),
+        'psh_testteacheraaaaaaaaaaaaaaa': dict({
+          'id': 'psh_testteacheraaaaaaaaaaaaaaa',
+          'name': '**REDACTED**',
+          'type': 'teacher',
+        }),
+      }),
+    }),
+    'entry': dict({
+      'data': dict({
+        'auth_implementation': 'fluentpet',
+        'cloudhook': False,
+        'household_id': 'hh_testhouseholdaaaaaaaaaaaaa',
+        'token': dict({
+          'access_token': '**REDACTED**',
+          'expires_in': 86400,
+          'id_token': '**REDACTED**',
+          'refresh_token': '**REDACTED**',
+          'token_type': 'Bearer',
+        }),
+        'webhook_endpoint_id': '00000000-0000-4000-8000-000000009001',
+        'webhook_id': '**REDACTED**',
+        'webhook_secret': '**REDACTED**',
+        'webhook_url': '**REDACTED**',
+      }),
+      'disabled_by': None,
+      'discovery_keys': dict({
+      }),
+      'domain': 'fluentpet',
+      'entry_id': '01J0FLUENTPETENTRY000000000',
+      'minor_version': 1,
+      'options': dict({
+      }),
+      'pref_disable_new_entities': False,
+      'pref_disable_polling': False,
+      'source': 'user',
+      'subentries': list([
+      ]),
+      'title': '**REDACTED**',
+      'unique_id': 'hh_testhouseholdaaaaaaaaaaaaa',
+      'version': 1,
+    }),
+    'feed': dict({
+      'has_cursor': True,
+      'pending_presses': 0,
+      'update_interval': 30.0,
+    }),
+    'webhook': dict({
+      'active': True,
+      'auto_disabled': False,
+      'last_delivery': None,
+      'uses_cloudhook': False,
+    }),
+  })
+# ---

@@ -1,0 +1,148 @@
+{
+  "application_credentials": {
+    "description": "FluentPet Connect signs in with your FluentPet account. If Home Assistant asks for an application credential, follow the instructions at {more_info_url}."
+  },
+  "config": {
+    "abort": {
+      "already_configured": "Every household of this account is already configured.",
+      "cannot_connect": "Failed to connect to FluentPet.",
+      "missing_configuration": "The integration is not configured. Add an application credential first, as described in the documentation.",
+      "no_households": "Your FluentPet account does not belong to a household.",
+      "not_admin": "You are not the admin of {name}. Ask the household admin to set up the integration, because only the admin receives button presses and manages webhooks.",
+      "reauth_successful": "Re-authentication was successful.",
+      "unique_id_mismatch": "The account you signed in with does not have access to this household. Sign in with the account of the household admin."
+    },
+    "create_entry": {
+      "default": "Successfully authenticated."
+    },
+    "error": {
+      "invalid_api_base_url": "Enter an https URL with a host name, without a user name, query or fragment."
+    },
+    "step": {
+      "household": {
+        "data": {
+          "household_id": "Household"
+        },
+        "data_description": {
+          "household_id": "The household whose buttons, Bases, learners and teachers are added to Home Assistant."
+        },
+        "title": "Choose a household"
+      },
+      "pick_implementation": {
+        "data": {
+          "implementation": "Application credentials"
+        },
+        "data_description": {
+          "implementation": "The credentials you want to use to authenticate."
+        },
+        "title": "Pick authentication method"
+      },
+      "reauth_confirm": {
+        "description": "FluentPet Connect needs you to sign in again for {name}.",
+        "title": "Authentication expired for {name}"
+      },
+      "user": {
+        "description": "Select Submit to sign in with your FluentPet account.",
+        "sections": {
+          "advanced": {
+            "data": {
+              "api_base_url": "API base URL"
+            },
+            "data_description": {
+              "api_base_url": "For developers: the https address of another FluentPet API host. Keep the default to use FluentPet."
+            },
+            "name": "Advanced options"
+          }
+        },
+        "title": "Sign in to FluentPet"
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "press": {
+        "name": "Press",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "press": "Press"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "last_interaction": {
+        "name": "Last interaction"
+      },
+      "last_seen": {
+        "name": "Last seen",
+        "state_attributes": {
+          "battery_level": {
+            "name": "Battery level"
+          },
+          "power_mode": {
+            "name": "Power mode",
+            "state": {
+              "battery": "Battery",
+              "plugged_in": "Plugged in"
+            }
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "authentication_failed": {
+      "message": "FluentPet refused the credentials. Sign in again to continue."
+    },
+    "update_error": {
+      "message": "Error communicating with FluentPet: {error}"
+    },
+    "webhook_not_deleted": {
+      "message": "Home Assistant could not delete the FluentPet webhook of {household}, so FluentPet keeps trying to deliver events to it. Sign in at {url} and delete the webhook of Home Assistant there."
+    }
+  },
+  "issues": {
+    "not_admin": {
+      "description": "FluentPet refused to send the button presses of {household}, because the account Home Assistant signed in with is no longer the household admin. Only the household admin receives button presses and manages webhooks, so presses do not reach Home Assistant now.\n\nMake this account the household admin again in the FluentPet app, or ask the household admin to set up the integration with their account. Home Assistant checks again regularly; this issue goes away once admin access returns.",
+      "title": "FluentPet household admin access needed"
+    },
+    "webhook_disabled": {
+      "description": "FluentPet stopped delivering events of {household} to Home Assistant after repeated failed deliveries. Button presses are now read every refresh interval, so they arrive with a delay.\n\nCheck that Home Assistant is reachable from the internet, then enable the webhook again at {url}. This issue goes away once the webhook is enabled.",
+      "title": "FluentPet webhook disabled"
+    },
+    "webhook_limit": {
+      "description": "FluentPet did not create a webhook for {household}, because the household already has the most webhooks FluentPet allows. Button presses are now read every refresh interval, so they arrive with a delay.\n\nDelete a webhook you no longer use at {url}, for example one left by an earlier Home Assistant installation. Home Assistant tries again regularly; this issue goes away once the webhook is created.",
+      "title": "FluentPet webhook limit reached"
+    }
+  },
+  "options": {
+    "error": {
+      "invalid_api_base_url": "Enter an https URL with a host name, without a user name, query or fragment."
+    },
+    "step": {
+      "init": {
+        "data": {
+          "prefer_cloudhook": "Prefer Home Assistant Cloud",
+          "scan_interval": "Refresh interval"
+        },
+        "data_description": {
+          "prefer_cloudhook": "Receive events through a Home Assistant Cloud webhook when you have a subscription, instead of your external URL.",
+          "scan_interval": "Seconds between refreshes of the Bases, buttons and event feed. With a webhook, events arrive sooner."
+        },
+        "sections": {
+          "advanced": {
+            "data": {
+              "api_base_url": "API base URL"
+            },
+            "data_description": {
+              "api_base_url": "For developers: the https address of another FluentPet API host. Changing it registers a new webhook at the new host; the webhook at the previous host is not deleted."
+            },
+            "name": "Advanced options"
+          }
+        }
+      }
+    }
+  }
+}

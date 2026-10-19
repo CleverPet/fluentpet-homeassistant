@@ -1,0 +1,25 @@
+{
+  "id": "00000000-0000-4000-8000-000000000004",
+  "type": "base.removed",
+  "occurred_at": "2026-10-17T10:05:00.000Z",
+  "created_at": "2026-10-17T10:05:00.050Z",
+  "payload": {
+    "version": 1,
+    "household": {
+      "id": "hh_testhouseholdaaaaaaaaaaaaa",
+      "name": "Test Household"
+    },
+    "base": {
+      "id": "base_testbasetwoaaaaaaaaaaaaaaa",
+      "serial": "TESTSERIAL0002",
+      "name": "Test Base Two",
+      "fw_version": "2.4.20260901"
+    },
+    "default_learner": {
+      "id": "psh_testlearneraaaaaaaaaaaaaaa",
+      "name": "Test Learner",
+      "type": "learner"
+    },
+    "reason": "moved_out"
+  }
+}

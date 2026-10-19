@@ -19,10 +19,8 @@ coverage.xml
 # Home Assistant dev config
 config/
 
-# Claude Code local state
-.claude/worktrees/
-.claude/state/
-.claude/settings.local.json
+# Claude Code local files
+.claude/
 
 # Editors
 .idea/

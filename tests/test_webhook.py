@@ -812,7 +812,8 @@ async def test_undecodable_body_rejected(
     assert registered_entry.runtime_data.webhook.last_delivery is None
     assert (
         "Could not read the body of FluentPet webhook delivery "
-        "00000000-0000-4000-8000-00000000d001"
+        "00000000-0000-4000-8000-00000000d001: 400, message: "
+        "Can not decode content-encoding: gzip"
     ) in caplog.text
     assert "Error processing webhook" not in caplog.text
 

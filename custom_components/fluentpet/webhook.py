@@ -18,6 +18,7 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.util import dt as dt_util
+from homeassistant.util.aiohttp import MockRequest
 
 from . import cloudhook
 from .const import (
@@ -616,7 +617,22 @@ class FluentPetWebhookManager:
         self, hass: HomeAssistant, webhook_id: str, request: web.Request
     ) -> web.Response:
         """Verify, deduplicate and process one webhook delivery."""
-        body = await request.read()
+        delivery = request.headers.get(HEADER_DELIVERY)
+        try:
+            body = await _async_read_body(request)
+        except web.HTTPRequestEntityTooLarge as err:
+            LOGGER.warning(
+                "Rejected FluentPet webhook delivery %s: %s", delivery, err.text
+            )
+            return web.Response(status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        except (web.RequestPayloadError, OSError) as err:
+            LOGGER.warning(
+                "Could not read the body of FluentPet webhook delivery %s: %s",
+                delivery,
+                # aiohttp's payload errors span lines; keep the warning on one.
+                " ".join(str(err).split()) or type(err).__name__,
+            )
+            return web.Response(status=HTTPStatus.BAD_REQUEST)
         secret = self.entry.data.get(CONF_WEBHOOK_SECRET)
         timestamp = request.headers.get(HEADER_TIMESTAMP)
         signature = request.headers.get(HEADER_SIGNATURE)
@@ -638,7 +654,6 @@ class FluentPetWebhookManager:
             LOGGER.warning("Rejected a FluentPet webhook body: %s", err)
             return web.Response(status=HTTPStatus.BAD_REQUEST)
 
-        delivery = request.headers.get(HEADER_DELIVERY)
         if delivery is not None and not self.processor.seen_deliveries.add(delivery):
             LOGGER.debug("Ignoring repeated delivery %s", delivery)
             return web.Response(status=HTTPStatus.OK)
@@ -651,3 +666,16 @@ class FluentPetWebhookManager:
         self.processor.coordinator.async_base_seen(event)
         self.processor.async_process(event)
         return web.Response(status=HTTPStatus.OK)
+
+
+async def _async_read_body(request: web.Request | MockRequest) -> bytes:
+    """Return the raw body of a direct or a Home Assistant Cloud request.
+
+    Home Assistant Cloud hands a cloudhook delivery over as a MockRequest, which
+    has no read(). Its content stream returns the whole body from memory. A
+    direct request is read with read(), which enforces the server's body size
+    limit and raises RequestPayloadError for a body it cannot decode.
+    """
+    if isinstance(request, MockRequest):
+        return await request.content.read()
+    return await request.read()

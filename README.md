@@ -797,3 +797,5 @@ there yet. Its tests are in `tests/fluentpet_api`. See
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+FluentPet is a trademark of CleverPet, Inc. The license does not grant rights to the FluentPet name or logos.

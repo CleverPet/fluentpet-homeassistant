@@ -25,6 +25,7 @@ from custom_components.fluentpet.const import (
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
     DOMAIN,
+    RESOURCE_POLL_INTERVAL,
     SAFETY_POLL_INTERVAL,
     SLOW_RETRY_MIN,
 )
@@ -50,7 +51,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import OAuth2TokenRequestConnectionError
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.update_coordinator import REQUEST_REFRESH_DEFAULT_COOLDOWN
 from homeassistant.util import dt as dt_util
 from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
@@ -739,6 +740,239 @@ async def test_power_mode_delivery_updates_sensors(
     await hass.async_block_till_done()
     assert hass.states.get(plug).state == "off"
     assert hass.states.get(battery).state == "50"
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_firmware_reported_delivery_updates_devices(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """A delivered base.updated or button.updated firmware_reported updates the devices.
+
+    Each delivery reads the resources without waiting for the safety poll. A
+    Base moving to a build that is not a published release has its firmware
+    version cleared.
+    """
+    base_id = "base_testbaseoneaaaaaaaaaaaaaaa"
+    button_id = "btn_testbuttonoutsideaaaaaaaaa"
+    entry_id = registered_entry.entry_id
+
+    def _sw_version(identifier: str) -> str | None:
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, identifier), entry_id
+        )
+        assert device is not None
+        return device.sw_version
+
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    assert _sw_version(base_id) == "1.1.0"
+    assert _sw_version(button_id) == "1.1.0"
+    first, second = mock_client.async_get_bases.return_value
+    outside, *rest = mock_client.async_get_buttons.return_value
+
+    mock_client.async_get_bases.return_value = [
+        replace(first, firmware_version="1.1.1"),
+        second,
+    ]
+    buttons_read = mock_client.async_get_buttons.await_count
+    body = _body("base_firmware_reported")
+    headers = signed_headers(
+        body,
+        event_type="base.updated",
+        delivery="00000000-0000-4000-8000-00000000d0b1",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    assert _sw_version(base_id) == "1.1.1"
+
+    # Past the cooldown of the requested refresh.
+    await _wait(hass, freezer, timedelta(seconds=REQUEST_REFRESH_DEFAULT_COOLDOWN + 1))
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, firmware_version="1.1.1"),
+        *rest,
+    ]
+    buttons_read = mock_client.async_get_buttons.await_count
+    body = _body("button_firmware_reported")
+    headers = signed_headers(
+        body,
+        event_type="button.updated",
+        delivery="00000000-0000-4000-8000-00000000d0b2",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    assert _sw_version(button_id) == "1.1.1"
+
+    await _wait(hass, freezer, timedelta(seconds=REQUEST_REFRESH_DEFAULT_COOLDOWN + 1))
+    mock_client.async_get_bases.return_value = [
+        replace(first, firmware_version=None),
+        second,
+    ]
+    data = load_json_fixture("events/base_firmware_reported.json")
+    data["id"] = "00000000-0000-4000-8000-000000000018"
+    data["created_at"] = dt_util.utcnow().isoformat()
+    data["payload"]["base"]["firmware_version"] = None
+    data["payload"]["changes"]["firmware_version"] = ["1.1.1", None]
+    body = json.dumps(data).encode()
+    headers = signed_headers(
+        body,
+        event_type="base.updated",
+        delivery="00000000-0000-4000-8000-00000000d0b3",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert _sw_version(base_id) is None
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_safety_poll_device_versions(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """The safety poll updates Base firmware and reads buttons on a firmware change.
+
+    A Base change other than its firmware reads no buttons, whose firmware
+    versions are kept. A firmware change without an event (a release table
+    update at FluentPet) reads the buttons in the same poll, so their firmware
+    versions follow.
+    """
+    entry_id = registered_entry.entry_id
+
+    def _sw_version(identifier: str) -> str | None:
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, identifier), entry_id
+        )
+        assert device is not None
+        return device.sw_version
+
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    first, second = mock_client.async_get_bases.return_value
+    outside, play, walk = mock_client.async_get_buttons.return_value
+
+    buttons_read = mock_client.async_get_buttons.await_count
+    bases_read = mock_client.async_get_bases.await_count
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=25),
+        second,
+    ]
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, firmware_version=None),
+        play,
+        walk,
+    ]
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_bases.await_count == bases_read + 1
+    assert hass.states.get("sensor.test_base_battery").state == "25"
+    assert mock_client.async_get_buttons.await_count == buttons_read
+    assert _sw_version("base_testbaseoneaaaaaaaaaaaaaaa") == "1.1.0"
+    assert _sw_version("btn_testbuttonoutsideaaaaaaaaa") == "1.1.0"
+
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=25),
+        replace(second, firmware_version="1.2.0"),
+    ]
+    mock_client.async_get_buttons.return_value = [
+        outside,
+        replace(play, firmware_version="1.2.0"),
+        walk,
+    ]
+    bases_read = mock_client.async_get_bases.await_count
+    learners_read = mock_client.async_get_learners.await_count
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    # The Bases once, then the buttons and learners in the same poll.
+    assert mock_client.async_get_bases.await_count == bases_read + 1
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    assert mock_client.async_get_learners.await_count == learners_read + 1
+    assert _sw_version("base_testbasetwoaaaaaaaaaaaaaaa") == "1.2.0"
+    assert _sw_version("btn_testbuttonplayaaaaaaaaaaaa") == "1.2.0"
+
+    # The same firmware again reads no buttons.
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_safety_poll_reads_buttons_hourly(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """While push is active the buttons are read once RESOURCE_POLL_INTERVAL passed.
+
+    A button's firmware version can change without an event and without a
+    change on its Base (a release table update at FluentPet).
+    """
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    buttons_read = mock_client.async_get_buttons.await_count
+    learners_read = mock_client.async_get_learners.await_count
+    outside, *rest = mock_client.async_get_buttons.return_value
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, firmware_version="1.0.7.1"),
+        *rest,
+    ]
+
+    polls = RESOURCE_POLL_INTERVAL // SAFETY_POLL_INTERVAL
+    for _ in range(polls - 1):
+        await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_buttons.await_count == buttons_read
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    assert mock_client.async_get_learners.await_count == learners_read + 1
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, outside.id), registered_entry.entry_id
+    )
+    assert device is not None
+    assert device.sw_version == "1.0.7.1"
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_event_read_restarts_hourly_read(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A Buttons read after a delivered event counts as the hourly read."""
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    polls = RESOURCE_POLL_INTERVAL // SAFETY_POLL_INTERVAL
+    for _ in range(polls // 2):
+        await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    buttons_read = mock_client.async_get_buttons.await_count
+    body = _body("button_firmware_reported")
+    headers = signed_headers(
+        body,
+        event_type="button.updated",
+        delivery="00000000-0000-4000-8000-00000000d0b4",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+
+    # Not at the hour after the first read, but an hour after the event's read.
+    for _ in range(polls - 1):
+        await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert mock_client.async_get_buttons.await_count == buttons_read + 2
 
 
 async def _deliver_cloudhook(

@@ -92,7 +92,7 @@ def test_press_created() -> None:
     assert data.base is not None
     assert data.base.id == BASE_ID
     assert data.base.serial == "TESTSERIAL0001"
-    assert data.base.fw_version is None
+    assert data.base.firmware_version is None
     assert data.button is not None
     assert data.button.id == BTN_OUT
     assert data.button.normalized_word == "outside"
@@ -151,10 +151,12 @@ def test_interaction_updated_tolerant() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "reason"),
-    [("base_added", "registered"), ("base_removed", "moved_out")],
+    ("name", "reason", "firmware_version"),
+    [("base_added", "registered", "1.1.0"), ("base_removed", "moved_out", None)],
 )
-def test_base_added_removed(name: str, reason: str) -> None:
+def test_base_added_removed(
+    name: str, reason: str, firmware_version: str | None
+) -> None:
     """base.added and base.removed carry the Base with its firmware version."""
     event = _event(name)
     data = event.data
@@ -162,7 +164,7 @@ def test_base_added_removed(name: str, reason: str) -> None:
     assert isinstance(data, LifecycleEventData)
     assert event.event_type in LIFECYCLE_EVENT_TYPES
     assert data.reason == reason
-    assert data.base.fw_version == "2.4.20260901"
+    assert data.base.firmware_version == firmware_version
     assert data.changes == {}
 
 
@@ -219,6 +221,32 @@ def test_button_updated() -> None:
     assert data.changes["normalized_word"] == ("out", "outside")
     assert data.changes["audio_id"] == (None, "aud_testaudiooutsideaaaaaaaaaa")
     assert data.changes["battery_level"] == (75, 50)
+    assert data.button.firmware_version == "1.1.0"
+
+
+def test_base_firmware_reported() -> None:
+    """base.updated with reason firmware_reported carries the new firmware release."""
+    data = _event("base_firmware_reported").data
+    assert isinstance(data, BaseEventData)
+    assert data.reason == "firmware_reported"
+    assert data.base.firmware_version == "1.1.1"
+    assert data.changes == {"firmware_version": ("1.1.0", "1.1.1")}
+
+
+def test_button_firmware_reported() -> None:
+    """button.updated with reason firmware_reported carries the new firmware release."""
+    data = _event("button_firmware_reported").data
+    assert isinstance(data, ButtonEventData)
+    assert data.reason == "firmware_reported"
+    assert data.button.firmware_version == "1.1.1"
+    assert data.changes == {"firmware_version": ("1.1.0", "1.1.1")}
+
+
+def test_button_ref_without_firmware_version() -> None:
+    """A button of a payload without firmware_version reads it as None."""
+    data = _event("button_removed").data
+    assert isinstance(data, ButtonEventData)
+    assert data.button.firmware_version is None
 
 
 def test_button_linked() -> None:
@@ -516,3 +544,11 @@ def test_battery_updated_at(raw: object, expected: datetime | None) -> None:
         {"id": BTN_OUT, "name": "Outside", "battery_updated_at": raw}
     )
     assert button.battery_updated_at == expected
+
+
+def test_base_unknown_key() -> None:
+    """A key the Base model does not know is ignored."""
+    data = {**load_json_fixture("bases.json")["data"][0], "unexpected": "x"}
+    base = Base.from_dict(data)
+    assert base.firmware_version == "1.1.0"
+    assert not hasattr(base, "unexpected")

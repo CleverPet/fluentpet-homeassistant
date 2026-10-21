@@ -13,7 +13,7 @@
       "id": "base_testbaseoneaaaaaaaaaaaaaaa",
       "serial": "TESTSERIAL0001",
       "name": "Test Base",
-      "fw_version": "2.4.20260901",
+      "firmware_version": "1.1.0",
       "battery_level": 75,
       "power_mode": "battery"
     },

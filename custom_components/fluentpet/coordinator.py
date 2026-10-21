@@ -30,6 +30,7 @@ from .const import (
     MANUFACTURER,
     MAX_BACKOFF,
     MODEL_BUTTON,
+    RESOURCE_POLL_INTERVAL,
     SAFETY_POLL_INTERVAL,
     STORAGE_VERSION,
     STORE_SAVE_DELAY,
@@ -114,7 +115,10 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
     webhook is healthy, a safety poll every SAFETY_POLL_INTERVAL reads the feed
     and the Bases (for their last seen time); the buttons and learners are read
     too after a lifecycle event (base, button or pusher), after a feed press of
-    an unknown button, once when the webhook becomes healthy, after a failed
+    an unknown button, when a Base reports another firmware version (in the
+    same poll), at a safety poll RESOURCE_POLL_INTERVAL after their last read
+    (a button's firmware version can change without an event), once when the
+    webhook becomes healthy, after a failed
     refresh, when the feed had to restart at its newest event, and on request.
     Pushed presses and interactions move the last seen time of their Base
     forward in between.
@@ -172,6 +176,8 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         self._backing_off = False
         # Whether the buttons last committed were complete.
         self._buttons_complete = True
+        # When the buttons and learners were last read.
+        self._resources_read_at: datetime | None = None
         # Last seen times pushed events set, per Base id, until a Bases read
         # catches up (see _async_apply_pushed_seen).
         self._pushed_seen: dict[str, datetime] = {}
@@ -361,7 +367,12 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             if self.webhook is not None:
                 await self.webhook.async_check()
             reset = await self._async_poll_feed()
-            if self._refresh_is_full or reset or self._feed_needs_resources():
+            if (
+                self._refresh_is_full
+                or reset
+                or self._feed_needs_resources()
+                or self._resources_due()
+            ):
                 # Also in a safety poll whose feed restarted at its newest event
                 # (which may skip lifecycle events), or has a lifecycle event the
                 # webhook did not deliver or a press of an unknown button: once,
@@ -371,6 +382,11 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 # The safety poll: the Bases, for their last seen time. Buttons
                 # and learners follow their events.
                 resources = await self._async_fetch_bases()
+                if self._firmware_changed(resources.data.bases):
+                    # A release table update at FluentPet renames firmware
+                    # without an event; the buttons take theirs from the same
+                    # table, so they are read too.
+                    resources = await self._async_fetch_resources(resources)
         except (FluentPetAuthError, OAuth2TokenRequestReauthError) as err:
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN, translation_key="authentication_failed"
@@ -423,6 +439,29 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         return False
 
     @callback
+    def _resources_due(self) -> bool:
+        """Return whether the buttons and learners were last read too long ago.
+
+        Half a safety poll early counts: the poll that falls due an hour after
+        the last read may start a moment before the hour is complete.
+        """
+        return (
+            self._resources_read_at is None
+            or dt_util.utcnow() - self._resources_read_at
+            >= RESOURCE_POLL_INTERVAL - SAFETY_POLL_INTERVAL / 2
+        )
+
+    @callback
+    def _firmware_changed(self, bases: dict[str, Base]) -> bool:
+        """Return whether a known Base reports another firmware version."""
+        known = self.data.bases
+        return any(
+            base.id in known
+            and base.firmware_version != known[base.id].firmware_version
+            for base in bases.values()
+        )
+
+    @callback
     def _async_apply_pushed_seen(self, resources: _ResourceRead) -> _ResourceRead:
         """Apply the last seen times pushed events set to the Bases read.
 
@@ -445,11 +484,18 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             bases[base_id] = replace(base, last_online_at=seen)
         return replace(resources, data=replace(resources.data, bases=bases))
 
-    async def _async_fetch_resources(self) -> _ResourceRead:
-        """Fetch the Bases, buttons and learners of the household."""
+    async def _async_fetch_resources(
+        self, bases_read: _ResourceRead | None = None
+    ) -> _ResourceRead:
+        """Fetch the Bases, buttons and learners of the household.
+
+        With bases_read, the Bases of that read are kept and only the buttons and
+        learners are fetched.
+        """
         # Counts button reads, so presses of unknown buttons wait for one that
         # started after they arrived (see async_drop_stale_pending).
         self.refresh_count += 1
+        self._resources_read_at = dt_util.utcnow()
         skipped: list[str] = []
 
         def _skip(kind: str) -> Callable[[FluentPetParseError], None]:
@@ -460,13 +506,19 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             return _on_invalid
 
         household_id = self.household_id
-        data = FluentPetHouseholdData(
-            bases={
+        if bases_read is None:
+            bases = {
                 base.id: base
                 for base in await self.client.async_get_bases(
                     household_id, on_invalid=_skip("Base")
                 )
-            },
+            }
+            bases_complete = True
+        else:
+            bases = bases_read.data.bases
+            bases_complete = bases_read.bases_complete
+        data = FluentPetHouseholdData(
+            bases=bases,
             buttons={
                 button.id: button
                 for button in await self.client.async_get_buttons(
@@ -480,10 +532,11 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 )
             },
         )
+        complete = bases_complete and not skipped
         return _ResourceRead(
             data,
-            bases_complete=not skipped,
-            buttons_complete=not skipped,
+            bases_complete=complete,
+            buttons_complete=complete,
             buttons_read=True,
         )
 
@@ -754,7 +807,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 manufacturer=MANUFACTURER,
                 model=base.model,
                 serial_number=base.serial,
-                sw_version=base.fw_version,
+                sw_version=base.firmware_version,
                 via_device_id=hub.id,
             ).id
         for button in data.buttons.values():
@@ -765,6 +818,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 manufacturer=MANUFACTURER,
                 model=MODEL_BUTTON,
                 serial_number=button.serial,
+                sw_version=button.firmware_version,
                 via_device_id=base_device_ids.get(button.base_id or "", hub.id),
             )
 

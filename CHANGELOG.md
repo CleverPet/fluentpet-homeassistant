@@ -133,3 +133,16 @@ All notable changes to this project are documented in this file.
 - Reauthentication signs in again with the application credential of the
   entry instead of asking to pick one, and the credential picker shows each
   credential by its name.
+- Base devices show the FluentPet firmware release (such as `1.1.0`) as their
+  firmware version; Button devices show the firmware release of their Button
+  image.
+  The firmware version is left empty while FluentPet reports none, including
+  when the installed build is not a published release. It replaces the raw
+  firmware component string Bases showed before. A `firmware_reported`
+  `base.updated` or `button.updated` event delivered by the webhook updates
+  the device within seconds. FluentPet can publish a build as a release
+  without an event: a safety poll that finds a Base with another firmware
+  version also reads the Buttons, and the safety poll an hour after the last
+  read of the Buttons and learners reads them again, so Button firmware
+  versions follow at that poll, about an hour later. Entity ids and unique
+  ids are unchanged.

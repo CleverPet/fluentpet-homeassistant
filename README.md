@@ -62,6 +62,17 @@ The integration creates one config entry per household and these devices:
 | Base (named after the Base, or `Base <serial>`) | Base model from FluentPet | Household |
 | Button (named after the Button) | Connect Button | Its Base, or the household when it has no Base |
 
+A Base device shows its firmware version (the FluentPet firmware release, such
+as `1.1.0`). A Button device shows the firmware version of the release its
+Button image belongs to. The firmware version is left empty while FluentPet
+has no report yet, for an unlinked Button, and when the installed build is
+not a published FluentPet release. A firmware change pushed as a
+`base.updated` or `button.updated` event (reason `firmware_reported`) updates
+the device within seconds; while polling, it shows up at the next refresh. FluentPet can also rename a build
+as a published release without an event. A Base shows that at the next
+refresh or safety poll, which then also reads the Buttons. A Button shows it
+at the safety poll an hour after the Buttons were last read.
+
 Entities:
 
 | Entity | Platform | Device | Example entity id |
@@ -314,8 +325,10 @@ The integration works in one of two modes:
   and keep the stored feed position current, and then the Bases, for their
   last seen time, power mode and battery level: two requests, plus the
   webhook check every 5 minutes.
-  Buttons and learners are read after their events (see
-  [Bases and Buttons](#bases-and-buttons)).
+  Buttons and learners (two more requests) are read after their events (see
+  [Bases and Buttons](#bases-and-buttons)), when a Base reports another
+  firmware version, and at the safety poll an hour after their last read,
+  because FluentPet can change a Button's firmware version without an event.
 - **Polling.** Every refresh interval reads the event feed, then the Bases,
   Buttons and learners.
 
@@ -377,7 +390,10 @@ reports that a Base, Button, learner or teacher was added, changed or removed
 Base changes). Such an event delivered by the webhook reads them within
 seconds. One read from the feed costs no extra refresh: a polling refresh read
 them already, and a safety poll that finds such an event the webhook missed
-reads them once, in the same poll. A press or interaction delivered by the
+reads them once, in the same poll. A safety poll also reads the Buttons and
+learners when a Base reports another firmware version, and at the safety
+poll an hour after their last read: FluentPet can rename a build as a published
+release without an event. A press or interaction delivered by the
 webhook moves the last seen time of its Base forward to when FluentPet stored
 the event, without a request. A later read with an older or unknown time does
 not move it back until Home Assistant restarts or the integration reloads.

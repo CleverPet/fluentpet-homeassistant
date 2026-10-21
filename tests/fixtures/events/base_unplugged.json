@@ -13,7 +13,7 @@
       "id": "base_testbasetwoaaaaaaaaaaaaaaa",
       "serial": "TESTSERIAL0002",
       "name": null,
-      "fw_version": null,
+      "firmware_version": null,
       "battery_level": 50,
       "power_mode": "battery"
     },

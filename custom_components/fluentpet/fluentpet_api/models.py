@@ -170,6 +170,9 @@ class Base:
     """A FluentPet Connect Base of a household.
 
     Attributes:
+        firmware_version: The public name of the firmware release the Base last reported,
+            such as 1.1.0, or None before its first report or when the installed build is
+            not a published release. A display string, not a comparable version.
         connected: The online flag FluentPet derives from the Base's sessions, or None
             when unknown. It flips with every session of a Base on battery.
         last_online_at: When FluentPet last heard from the Base, or None.
@@ -184,7 +187,7 @@ class Base:
     id: str
     serial: str
     name: str | None
-    fw_version: str | None
+    firmware_version: str | None
     model: str | None
     connected: bool | None
     last_online_at: datetime | None
@@ -199,7 +202,7 @@ class Base:
             id=_str(data, "id"),
             serial=_str(data, "serial"),
             name=_opt_str(data, "name"),
-            fw_version=_opt_str(data, "fw_version"),
+            firmware_version=_opt_str(data, "firmware_version"),
             model=_opt_str(data, "model"),
             connected=_opt_bool(data, "connected"),
             last_online_at=_opt_datetime(data, "last_online_at"),
@@ -222,6 +225,9 @@ class Button:
             pressed since FluentPet started reporting it, or one whose battery is empty
             (FluentPet reports an empty button battery as None, not 0).
         battery_updated_at: When FluentPet received the latest battery reading, or None.
+        firmware_version: The public name of the firmware release of the button's image,
+            such as 1.1.0, or None without an active pairing, before its first report or
+            when the installed build is not a published release.
     """
 
     id: str
@@ -232,6 +238,7 @@ class Button:
     audio_id: str | None
     battery_level: int | None = None
     battery_updated_at: datetime | None = None
+    firmware_version: str | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
@@ -245,6 +252,7 @@ class Button:
             audio_id=_opt_str(data, "audio_id"),
             battery_level=_percent(data, "battery_level"),
             battery_updated_at=_opt_datetime(data, "battery_updated_at"),
+            firmware_version=_opt_str(data, "firmware_version"),
         )
 
 
@@ -397,13 +405,14 @@ class BaseRef:
     """A Base as an event payload names it.
 
     Attributes:
-        fw_version: Present on base.* events only.
+        firmware_version: base.* events only: the firmware release as Base.firmware_version
+            renders it.
     """
 
     id: str
     serial: str | None
     name: str | None
-    fw_version: str | None = None
+    firmware_version: str | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
@@ -412,7 +421,7 @@ class BaseRef:
             id=_str(data, "id"),
             serial=_opt_str(data, "serial"),
             name=_opt_str(data, "name"),
-            fw_version=_opt_str(data, "fw_version"),
+            firmware_version=_opt_str(data, "firmware_version"),
         )
 
 
@@ -424,6 +433,8 @@ class ButtonRef:
         audio_id: Lifecycle events only: the button's sound, or None.
         origin: Lifecycle events only: app, connect or interaction_importer.
         type: Lifecycle events only: connect while linked to a Base, else classic.
+        firmware_version: Lifecycle events only: the firmware release as
+            Button.firmware_version renders it.
     """
 
     id: str
@@ -432,6 +443,7 @@ class ButtonRef:
     audio_id: str | None = None
     origin: str | None = None
     type: str | None = None
+    firmware_version: str | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
@@ -443,6 +455,7 @@ class ButtonRef:
             audio_id=_opt_str(data, "audio_id"),
             origin=_opt_str(data, "origin"),
             type=_opt_str(data, "type"),
+            firmware_version=_opt_str(data, "firmware_version"),
         )
 
 

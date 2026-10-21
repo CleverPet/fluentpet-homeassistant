@@ -1,5 +1,6 @@
 """Tests for the FluentPet Connect coordinator and event feed."""
 
+from dataclasses import replace
 from datetime import timedelta
 import importlib
 from typing import Any
@@ -311,13 +312,16 @@ async def test_devices(
     assert base.manufacturer == "FluentPet"
     assert base.model == "connect-base"
     assert base.serial_number == "TESTSERIAL0001"
-    assert base.sw_version == "2.4.20260901"
+    assert base.sw_version == "1.1.0"
+    assert base.hw_version is None
 
     unnamed = device_registry.async_get_device_by_identifier(
         (DOMAIN, "base_testbasetwoaaaaaaaaaaaaaaa"), entry_id
     )
     assert unnamed is not None
     assert unnamed.name == "Base TESTSERIAL0002"
+    # Not a published release, or not reported yet.
+    assert unnamed.sw_version is None
 
     linked = device_registry.async_get_device_by_identifier(
         (DOMAIN, "btn_testbuttonoutsideaaaaaaaaa"), entry_id
@@ -326,6 +330,14 @@ async def test_devices(
     assert linked.via_device_id == base.id
     assert linked.model == "Connect Button"
     assert linked.serial_number == "TESTBTNSER01"
+    assert linked.sw_version == "1.1.0"
+    assert linked.hw_version is None
+
+    unpublished = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "btn_testbuttonplayaaaaaaaaaaaa"), entry_id
+    )
+    assert unpublished is not None
+    assert unpublished.sw_version is None
 
     unlinked = device_registry.async_get_device_by_identifier(
         (DOMAIN, "btn_testbuttonwalkaaaaaaaaaaaa"), entry_id
@@ -333,6 +345,65 @@ async def test_devices(
     assert unlinked is not None
     assert unlinked.via_device_id == hub.id
     assert unlinked.model == "Connect Button"
+    assert unlinked.sw_version is None
+
+
+async def test_device_versions_follow_refresh(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    device_registry: dr.DeviceRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A refresh updates the firmware versions of existing devices.
+
+    A Base or button moving to a build that is not a published release has its
+    firmware version cleared; a device registered with an earlier value keeps
+    its id.
+    """
+    # Not setup_integration: the entry must exist before the device is registered.
+    mock_config_entry.add_to_hass(hass)
+    old = device_registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, "base_testbaseoneaaaaaaaaaaaaaaa")},
+        manufacturer="FluentPet",
+        sw_version="2.4.20260901",
+    )
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    entry_id = mock_config_entry.entry_id
+
+    base = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "base_testbaseoneaaaaaaaaaaaaaaa"), entry_id
+    )
+    assert base is not None
+    assert base.id == old.id
+    assert base.sw_version == "1.1.0"
+
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, firmware_version=None),
+        replace(second, firmware_version="1.1.1"),
+    ]
+    outside, play, walk = buttons()
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, firmware_version=None),
+        replace(play, firmware_version="1.1.1"),
+        walk,
+    ]
+    await mock_config_entry.runtime_data.coordinator.async_request_refresh()
+    await hass.async_block_till_done()
+
+    versions = {
+        identifier: device.sw_version
+        for device in dr.async_entries_for_config_entry(device_registry, entry_id)
+        for _, identifier in device.identifiers
+    }
+    assert versions["base_testbaseoneaaaaaaaaaaaaaaa"] is None
+    assert versions["base_testbasetwoaaaaaaaaaaaaaaa"] == "1.1.1"
+    assert versions[OUTSIDE_ID] is None
+    assert versions["btn_testbuttonplayaaaaaaaaaaaa"] == "1.1.1"
+    assert versions["btn_testbuttonwalkaaaaaaaaaaaa"] is None
 
 
 async def test_button_model_updated_on_existing_device(

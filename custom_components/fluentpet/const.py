@@ -50,6 +50,10 @@ STORE_SAVE_DELAY: Final = 5
 # While the webhook is healthy, the event feed (to catch up events the webhook
 # missed) and the Bases (for their last seen time) are read this often.
 SAFETY_POLL_INTERVAL: Final = timedelta(minutes=5)
+# While the webhook is healthy, the buttons and learners are also read at a
+# safety poll this long after their last read: FluentPet can change a button's
+# firmware version (a release table update) without an event.
+RESOURCE_POLL_INTERVAL: Final = timedelta(hours=1)
 
 DEDUPE_SIZE: Final = 512
 PENDING_PRESS_LIMIT: Final = 20

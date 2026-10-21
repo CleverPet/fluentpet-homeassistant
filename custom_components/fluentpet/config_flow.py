@@ -15,7 +15,11 @@ from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN, UnitOfTime
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    AbstractOAuth2FlowHandler,
+    ImplementationUnavailableError,
+    async_get_implementations,
+)
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -30,6 +34,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import StaticTokenAuth, api_base_url, normalize_api_base_url
+from .application_credentials import async_import_public_credential
 from .const import (
     AUDIENCE,
     CONF_API_BASE_URL,
@@ -103,7 +108,7 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
         the host of the entry and skips the form.
         """
         if self.source == SOURCE_REAUTH:
-            return await super().async_step_user(user_input)
+            return await self._async_step_oauth(user_input)
         errors: dict[str, str] = {}
         if user_input is not None:
             url = normalize_api_base_url(
@@ -111,7 +116,7 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
             )
             if url is not None:
                 self._api_base_url = url
-                return await super().async_step_user()
+                return await self._async_step_oauth()
             errors["base"] = "invalid_api_base_url"
         return self.async_show_form(
             step_id="user",
@@ -122,6 +127,24 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def _async_step_oauth(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Import the public credential when needed, then start the OAuth2 sign-in.
+
+        async_setup imports the credential only once the integration is set up,
+        which on a first install happens after this flow. The manifest
+        dependency has set up application_credentials before any flow step.
+        """
+        try:
+            implementations = await async_get_implementations(self.hass, DOMAIN)
+        except ImplementationUnavailableError:
+            # Another provider is down; the FluentPet credential may still be missing.
+            implementations = {}
+        if not implementations:
+            await async_import_public_credential(self.hass)
+        return await super().async_step_user(user_input)
 
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]
@@ -138,7 +161,10 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 step_id="reauth_confirm",
                 description_placeholders={"name": self._get_reauth_entry().title},
             )
-        return await self.async_step_user()
+        # Sign in again with the entry's implementation, without the pick form.
+        return await self.async_step_user(
+            {"implementation": self._get_reauth_entry().data["auth_implementation"]}
+        )
 
     @override
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:

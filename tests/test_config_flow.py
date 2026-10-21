@@ -13,6 +13,7 @@ from yarl import URL
 from custom_components.fluentpet.api import AsyncConfigEntryAuth, StaticTokenAuth
 from custom_components.fluentpet.const import (
     AUDIENCE,
+    CLIENT_NAME,
     CONF_API_BASE_URL,
     CONF_HOUSEHOLD_ID,
     CONF_PREFER_CLOUDHOOK,
@@ -27,10 +28,15 @@ from custom_components.fluentpet.fluentpet_api import (
     FluentPetConnectionError,
     Household,
 )
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.setup import async_setup_component
 
 from .common import load_json_fixture, setup_integration
 from .conftest import CLIENT_ID, HOUSEHOLD_ID, OTHER_HOUSEHOLD_ID, households
@@ -406,6 +412,192 @@ async def test_reauth_not_admin(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "not_admin"
     assert mock_config_entry.data["token"]["access_token"] == "mock-access-token"
+
+
+@pytest.fixture
+def public_client_id() -> Generator[None]:
+    """Ship the mock client id as the public client id of the integration."""
+    with patch(
+        "custom_components.fluentpet.application_credentials.CLIENT_ID", CLIENT_ID
+    ):
+        yield
+
+
+async def _assert_credential_imported(hass: HomeAssistant) -> None:
+    """Assert that the flow imported the public credential."""
+    implementations = await config_entry_oauth2_flow.async_get_implementations(
+        hass, DOMAIN
+    )
+    assert list(implementations) == [DOMAIN]
+    implementation = implementations[DOMAIN]
+    assert isinstance(
+        implementation, config_entry_oauth2_flow.LocalOAuth2ImplementationWithPkce
+    )
+    assert implementation.client_id == CLIENT_ID
+    assert implementation.name == CLIENT_NAME
+
+
+USER_CLIENT_ID = "mock-user-client-id"
+USER_AUTH_DOMAIN = f"{DOMAIN}_user"
+
+
+async def _import_user_credential(hass: HomeAssistant) -> None:
+    """Add a credential the user entered, with another client id."""
+    assert await async_setup_component(hass, "application_credentials", {})
+    await async_import_client_credential(
+        hass,
+        DOMAIN,
+        ClientCredential(USER_CLIENT_ID, "", name="Mine"),
+        USER_AUTH_DOMAIN,
+    )
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_fresh_install_imports_credential(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+) -> None:
+    """A first install signs in without the integration being set up before."""
+    assert "application_credentials" not in hass.config.components
+    mock_client.async_get_households.return_value = [
+        Household(id=HOUSEHOLD_ID, name="Test Household", admin=True)
+    ]
+    result = await _start(hass)
+
+    assert DOMAIN not in hass.config.components
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    await _assert_credential_imported(hass)
+    result = await _authorize(
+        hass, hass_client_no_auth, aioclient_mock, result, check_url=True
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["auth_implementation"] == DOMAIN
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_reauth_imports_credential(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Reauthentication imports the public credential when it is missing.
+
+    This guards the reauth entry point; users do not normally reach a
+    reauthentication with the integration not set up.
+    """
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    await _assert_credential_imported(hass)
+    result = await _authorize(hass, hass_client_no_auth, aioclient_mock, result)
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.data["token"]["access_token"] == "mock-new-access-token"
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_unavailable_provider_imports_credential(hass: HomeAssistant) -> None:
+    """A provider that is down does not keep the public credential out."""
+
+    async def _unavailable(
+        hass: HomeAssistant, domain: str
+    ) -> list[config_entry_oauth2_flow.AbstractOAuth2Implementation]:
+        raise config_entry_oauth2_flow.ImplementationUnavailableError("cloud down")
+
+    config_entry_oauth2_flow.async_add_implementation_provider(
+        hass, "cloud", _unavailable
+    )
+    result = await _start(hass)
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    await _assert_credential_imported(hass)
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_user_credential_skips_import(hass: HomeAssistant) -> None:
+    """A credential of the user is used, and the public one is not added."""
+    await _import_user_credential(hass)
+    result = await _start(hass)
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert URL(result["url"]).query["client_id"] == USER_CLIENT_ID
+    implementations = await config_entry_oauth2_flow.async_get_implementations(
+        hass, DOMAIN
+    )
+    assert list(implementations) == [USER_AUTH_DOMAIN]
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_reauth_keeps_implementation(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+    entry_data: dict[str, Any],
+) -> None:
+    """Reauthentication signs in with the entry's credential, without a pick form."""
+    await _import_user_credential(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        unique_id=HOUSEHOLD_ID,
+        data={**entry_data, "auth_implementation": USER_AUTH_DOMAIN},
+    )
+    entry.add_to_hass(hass)
+    assert (
+        len(await config_entry_oauth2_flow.async_get_implementations(hass, DOMAIN)) == 2
+    )
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert URL(result["url"]).query["client_id"] == USER_CLIENT_ID
+    result = await _authorize(hass, hass_client_no_auth, aioclient_mock, result)
+    await hass.async_block_till_done()
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["auth_implementation"] == USER_AUTH_DOMAIN
+    assert entry.data["token"]["access_token"] == "mock-new-access-token"
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_reauth_stale_implementation(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+    entry_data: dict[str, Any],
+) -> None:
+    """Reauthentication of an entry whose credential was removed uses another one."""
+    await _import_user_credential(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        unique_id=HOUSEHOLD_ID,
+        data={**entry_data, "auth_implementation": f"{DOMAIN}_old"},
+    )
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert URL(result["url"]).query["client_id"] == USER_CLIENT_ID
+    result = await _authorize(hass, hass_client_no_auth, aioclient_mock, result)
+    await hass.async_block_till_done()
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["auth_implementation"] == USER_AUTH_DOMAIN
+    assert entry.data["token"]["access_token"] == "mock-new-access-token"
 
 
 DEV_URL = "https://example.com/dev-api"

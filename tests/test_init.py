@@ -158,9 +158,12 @@ async def test_tail_cursor_forbidden(
 async def test_setup_imports_client_credential(hass: HomeAssistant) -> None:
     """A defined client id is imported as the application credential."""
     with (
-        patch("custom_components.fluentpet.CLIENT_ID", "mock-public-client-id"),
         patch(
-            "custom_components.fluentpet.async_import_client_credential"
+            "custom_components.fluentpet.application_credentials.CLIENT_ID",
+            "mock-public-client-id",
+        ),
+        patch(
+            "custom_components.fluentpet.application_credentials.async_import_client_credential"
         ) as mock_import,
     ):
         assert await async_setup_component(hass, DOMAIN, {})
@@ -172,7 +175,7 @@ async def test_setup_imports_client_credential(hass: HomeAssistant) -> None:
 async def test_setup_without_client_id(hass: HomeAssistant) -> None:
     """Without a client id nothing is imported."""
     with patch(
-        "custom_components.fluentpet.async_import_client_credential"
+        "custom_components.fluentpet.application_credentials.async_import_client_credential"
     ) as mock_import:
         assert await async_setup_component(hass, DOMAIN, {})
     mock_import.assert_not_called()

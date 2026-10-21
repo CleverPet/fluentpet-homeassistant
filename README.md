@@ -124,12 +124,13 @@ shown once the sensor is available again.
 
 ### Last seen sensor
 
-One per Base. The state is the time of the Base's last report to FluentPet,
-or unknown when FluentPet does not say. It is not an online or liveness
-signal: a Base reports only on activity (for example a press) or on its own
-schedule, so hours without a report are normal. The sensor is unavailable
-while refreshes from FluentPet fail. It has no attributes of its own; whether
-the Base runs plugged in is the [Power sensor](#power-sensor).
+One per Base. The state is the time of the Base's last report to FluentPet, or
+unknown when FluentPet does not say. It is not an online or liveness signal: a
+Base reports only on activity (for example a press) or on its own schedule, so
+hours without a report are normal. The sensor is unavailable while refreshes
+from FluentPet fail or the last read did not return the Base. It has no
+attributes of its own; whether the Base runs plugged in is the
+[Power sensor](#power-sensor).
 
 ### Power sensor
 
@@ -137,9 +138,10 @@ One per Base, a binary sensor named **Power** with device class `plug`. The
 state is `on` (shown as Plugged in) while the Base runs plugged in (FluentPet
 reports a charging Base as plugged in) and `off` (shown as Unplugged) while it
 runs on battery, so its history shows when a Base ran on battery. It is
-unknown while FluentPet has not reported a power mode for the Base, or
-reports one the integration does not know. The sensor is unavailable while
-refreshes from FluentPet fail. Buttons have no power sensor.
+unknown while FluentPet has not reported a power mode for the Base, or reports
+one the integration does not know. The sensor is unavailable while refreshes
+from FluentPet fail or the last read did not return the Base. Buttons have no
+power sensor.
 
 When a Base is plugged in or unplugged, FluentPet sends a `base.updated`
 event, which updates the sensor like a battery level change; see
@@ -152,7 +154,8 @@ diagnostic category. The state is the battery charge in percent. The
 precision is coarse: FluentPet reports only the values 100, 75, 50, 25 and 0,
 the same steps the FluentPet app shows, so the sensor changes in steps of 25.
 
-A battery sensor is unavailable while refreshes from FluentPet fail.
+A battery sensor is unavailable while refreshes from FluentPet fail or the
+last read did not return its Base or Button.
 
 A Base battery sensor shows the level FluentPet reports, whatever the power
 mode. It is unknown, and stays available, whenever FluentPet reports no level
@@ -715,8 +718,10 @@ sending button presses. Make the account the household admin again in the
 FluentPet app, or ask the household admin to set up the integration with
 their account. The issue goes away once admin access returns.
 
-**A Base's last seen sensor is unavailable.** The last refresh from FluentPet
-failed. Check the Home Assistant logs for errors from
+**A Base's last seen or Power sensor is unavailable.** The last refresh from
+FluentPet failed, or the last read did not return the Base (for example
+FluentPet sent it in a form the integration could not read, which is logged as
+a warning). Check the Home Assistant logs for errors from
 `custom_components.fluentpet`. A last seen of unknown means FluentPet has not
 reported when it last heard from the Base. A last seen hours ago is normal: a
 Base reports only on activity or on its own schedule.
@@ -726,7 +731,8 @@ battery level for it yet. A Button reports its level when it is pressed, so
 press it once. A Button battery sensor that becomes unavailable after showing
 a level can mean the battery is empty and needs replacing: FluentPet reports
 an empty Button battery as no level. Otherwise the last refresh from
-FluentPet failed; check the logs as above.
+FluentPet failed or the last read did not return the Base or Button; check
+the logs as above.
 
 **A Base battery sensor is unknown.** FluentPet reports no level for the
 Base. It reports none while the Base runs plugged in (its Power sensor is

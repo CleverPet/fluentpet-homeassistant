@@ -63,17 +63,16 @@ class FluentPetBasePowerSensor(FluentPetBaseEntity, BinarySensorEntity):
         super().__init__(coordinator, base_id, "power")
         # Unrecognized power modes already logged, so each is logged once.
         self._logged_modes: set[str] = set()
-        self._async_update_is_on()
+        self._update_attr()
 
     @callback
     @override
     def _handle_coordinator_update(self) -> None:
         """Update the state from the Bases of the refresh, then write it."""
-        self._async_update_is_on()
+        self._update_attr()
         super()._handle_coordinator_update()
 
-    @callback
-    def _async_update_is_on(self) -> None:
+    def _update_attr(self) -> None:
         """Set the state from the power mode of the Base, when it was returned."""
         if (base := self.coordinator.data.bases.get(self.base_id)) is None:
             return

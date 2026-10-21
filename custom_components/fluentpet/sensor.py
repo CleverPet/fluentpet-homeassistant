@@ -220,10 +220,11 @@ class FluentPetBaseLastSeenSensor(FluentPetBaseEntity, SensorEntity):
         return self.coordinator.data.bases[self.base_id].last_online_at
 
 
-class FluentPetBatterySensor(SensorEntity):
-    """The battery level of a Base or button, in percent.
+class FluentPetBatteryAttributes(SensorEntity):
+    """The attributes shared by the battery sensors of Bases and buttons.
 
-    FluentPet reports the level in the steps of its app (100, 75, 50, 25 and 0).
+    The level is in percent, in the steps of the FluentPet app (100, 75, 50, 25
+    and 0).
     """
 
     _attr_device_class = SensorDeviceClass.BATTERY
@@ -232,7 +233,7 @@ class FluentPetBatterySensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
 
 
-class FluentPetBaseBatterySensor(FluentPetBaseEntity, FluentPetBatterySensor):
+class FluentPetBaseBatterySensor(FluentPetBaseEntity, FluentPetBatteryAttributes):
     """The battery level of a Base.
 
     Unknown while FluentPet reports no level, as it does while the Base runs
@@ -250,7 +251,9 @@ class FluentPetBaseBatterySensor(FluentPetBaseEntity, FluentPetBatterySensor):
         return self.coordinator.data.bases[self.base_id].battery_level
 
 
-class FluentPetButtonBatterySensor(FluentPetCoordinatorEntity, FluentPetBatterySensor):
+class FluentPetButtonBatterySensor(
+    FluentPetCoordinatorEntity, FluentPetBatteryAttributes
+):
     """The battery level of a button, as its Base reports it.
 
     Unavailable while refreshes fail, the button is not returned, or FluentPet

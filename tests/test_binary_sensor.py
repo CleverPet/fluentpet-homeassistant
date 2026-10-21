@@ -266,10 +266,15 @@ async def test_incomplete_refresh(
     assert "Traceback" not in caplog.text
     assert "Error" not in caplog.text
 
+    # The Base returns with another power mode: the state is computed again.
     mock_client.async_get_bases.side_effect = None
-    mock_client.async_get_bases.return_value = [first, second]
+    mock_client.async_get_bases.return_value = [
+        replace(first, power_mode="battery", battery_level=50),
+        second,
+    ]
     await _refresh(hass, freezer)
-    assert hass.states.get(PLUGGED_IN).state == STATE_ON
+    assert hass.states.get(PLUGGED_IN).state == STATE_OFF
+    assert hass.states.get("sensor.test_base_battery").state == "50"
 
 
 async def test_feed_transition_while_polling(

@@ -60,7 +60,7 @@ The integration creates one config entry per household and these devices:
 | --- | --- | --- |
 | Household (service device, named after the household) | Household | |
 | Base (named after the Base, or `Base <serial>`) | Base model from FluentPet | Household |
-| Button (named after the Button) | Button | Its Base, or the household when it has no Base |
+| Button (named after the Button) | Connect Button | Its Base, or the household when it has no Base |
 
 Entities:
 

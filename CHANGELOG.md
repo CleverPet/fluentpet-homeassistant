@@ -15,6 +15,7 @@ All notable changes to this project are documented in this file.
   Assistant Cloud (default on).
 - Devices: household hub, Bases, and Buttons linked to their Base. Devices are
   added and removed as the household changes.
+- Button devices show the model Connect Button, matching the Connect Base.
 - Event platform: a press event entity per Button, fired when a learner or
   teacher presses it. The `pressed_by` attribute names who pressed it and
   whether that is a learner or a teacher.

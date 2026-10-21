@@ -842,11 +842,20 @@ async def test_oversized_body_rejected(
 
 
 @pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (ConnectionResetError("reset"), "reset"),
+        (ConnectionResetError(), "ConnectionResetError"),
+    ],
+)
 async def test_disconnected_body_rejected(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     registered_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
+    error: OSError,
+    reason: str,
 ) -> None:
     """A direct request whose sender disconnected mid-body is answered with 400.
 
@@ -858,7 +867,7 @@ async def test_disconnected_body_rejected(
     request.method = "POST"
     request.remote = "203.0.113.1"
     request.headers = signed_headers(body)
-    request.read = AsyncMock(side_effect=ConnectionResetError("reset"))
+    request.read = AsyncMock(side_effect=error)
     response = await async_handle_webhook(hass, WEBHOOK_ID, request)
     assert response.status == 400
     await hass.async_block_till_done()
@@ -866,7 +875,7 @@ async def test_disconnected_body_rejected(
     assert registered_entry.runtime_data.webhook.last_delivery is None
     assert (
         "Could not read the body of FluentPet webhook delivery "
-        "00000000-0000-4000-8000-00000000d001: reset"
+        f"00000000-0000-4000-8000-00000000d001: {reason}"
     ) in caplog.text
     assert "Error processing webhook" not in caplog.text
 

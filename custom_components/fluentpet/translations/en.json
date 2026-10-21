@@ -59,6 +59,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "plugged_in": {
+        "name": "Plugged in"
+      }
+    },
     "event": {
       "press": {
         "name": "Press",
@@ -76,16 +81,7 @@
         "name": "Last interaction"
       },
       "last_seen": {
-        "name": "Last seen",
-        "state_attributes": {
-          "power_mode": {
-            "name": "Power mode",
-            "state": {
-              "battery": "Battery",
-              "plugged_in": "Plugged in"
-            }
-          }
-        }
+        "name": "Last seen"
       }
     }
   },

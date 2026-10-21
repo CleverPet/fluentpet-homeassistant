@@ -50,7 +50,7 @@ from .fluentpet_api import (
 )
 from .webhook import FluentPetWebhookManager, webhook_issue_id, webhook_limit_issue_id
 
-PLATFORMS: list[Platform] = [Platform.EVENT, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.EVENT, Platform.SENSOR]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 

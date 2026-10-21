@@ -1121,7 +1121,7 @@ async def test_safety_poll_keeps_button_battery(
     first, second = bases()
     outside, *rest = buttons()
     mock_client.async_get_bases.return_value = [
-        dataclasses.replace(first, battery_level=25),
+        dataclasses.replace(first, battery_level=25, power_mode="battery"),
         second,
     ]
     mock_client.async_get_buttons.return_value = [

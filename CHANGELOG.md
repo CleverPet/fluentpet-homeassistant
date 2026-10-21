@@ -22,11 +22,16 @@ All notable changes to this project are documented in this file.
   restarts, with the same `pressed_by` attribute for the learner or teacher of
   the interaction.
 - Sensor platform: last seen sensor per Base (timestamp, the time of the
-  Base's last report), with the Base's power mode (`plugged_in` or `battery`)
-  as an attribute.
+  Base's last report), without attributes.
+- Binary sensor platform: plugged in sensor per Base (device class plug), on
+  while the Base runs plugged in, off on battery, unknown while FluentPet has
+  not reported a power mode. A `base.updated` event (reason
+  `battery_reported` or `power_mode_reported`) updates it right away.
 - Sensor platform: battery sensor per Base and per Button linked to a Base
   (device class battery, diagnostic), in the steps the FluentPet app shows
-  (100, 75, 50, 25, 0). Unavailable while FluentPet reports no level; a
+  (100, 75, 50, 25, 0). A Base battery sensor is unknown, and stays
+  available, while the Base runs plugged in or reports no level. A Button
+  battery sensor is unavailable while FluentPet reports no level; a
   Button reports its level from its first press after FluentPet started
   reporting Button levels. A Button's sensor is removed when it is unlinked
   from its Base and comes back when it is linked again. An empty Button

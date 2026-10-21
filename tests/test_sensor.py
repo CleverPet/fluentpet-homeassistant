@@ -22,7 +22,6 @@ from custom_components.fluentpet.fluentpet_api import (
     FluentPetParseError,
     InteractionUpdatedData,
 )
-from custom_components.fluentpet.sensor import FluentPetBaseLastSeenSensor
 from homeassistant.const import (
     PERCENTAGE,
     STATE_UNAVAILABLE,
@@ -237,16 +236,19 @@ async def test_last_seen(
     entity_registry: er.EntityRegistry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Each Base has a last seen timestamp with its power mode."""
+    """Each Base has a last seen timestamp without attributes of its own.
+
+    The power mode is the plugged in binary sensor, not an attribute.
+    """
     await setup_integration(hass, mock_config_entry)
     plugged_in = hass.states.get(PLUGGED_IN)
     assert plugged_in.state == "2026-10-17T12:00:00+00:00"
     assert plugged_in.attributes["device_class"] == "timestamp"
-    assert plugged_in.attributes["power_mode"] == "plugged_in"
+    assert "power_mode" not in plugged_in.attributes
     assert "battery_level" not in plugged_in.attributes
     on_battery = hass.states.get(ON_BATTERY)
     assert on_battery.state == "2026-10-17T11:45:00+00:00"
-    assert on_battery.attributes["power_mode"] == "battery"
+    assert "power_mode" not in on_battery.attributes
     assert "battery_level" not in on_battery.attributes
     entry = entity_registry.async_get(PLUGGED_IN)
     assert entry.unique_id == "base_testbaseoneaaaaaaaaaaaaaaa_last_seen"
@@ -260,8 +262,8 @@ async def test_last_seen(
     await _refresh(hass, freezer)
     plugged_in = hass.states.get(PLUGGED_IN)
     assert plugged_in.state == STATE_UNKNOWN
-    assert plugged_in.attributes["power_mode"] is None
-    assert hass.states.get(ON_BATTERY).attributes["power_mode"] == "plugged_in"
+    assert "power_mode" not in plugged_in.attributes
+    assert "power_mode" not in hass.states.get(ON_BATTERY).attributes
 
 
 async def test_last_seen_unavailable_while_refresh_fails(
@@ -280,16 +282,6 @@ async def test_last_seen_unavailable_while_refresh_fails(
     assert hass.states.get(PLUGGED_IN).state == "2026-10-17T12:00:00+00:00"
 
 
-async def test_last_seen_attributes_recorded(
-    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
-) -> None:
-    """The power mode is reported and kept in the recorder."""
-    await setup_integration(hass, mock_config_entry)
-    assert "power_mode" in hass.states.get(PLUGGED_IN).attributes
-    unrecorded = FluentPetBaseLastSeenSensor._unrecorded_attributes  # noqa: SLF001
-    assert "power_mode" not in unrecorded
-
-
 BASE_BATTERY = "sensor.test_base_battery"
 OTHER_BASE_BATTERY = "sensor.base_testserial0002_battery"
 BUTTON_BATTERY = "sensor.outside_battery"
@@ -303,10 +295,15 @@ async def test_base_battery(
     entity_registry: er.EntityRegistry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Each Base has a diagnostic battery sensor without attributes of its own."""
+    """Each Base has a diagnostic battery sensor without attributes of its own.
+
+    It is unknown, not unavailable, while the Base runs plugged in or reports no
+    level.
+    """
     await setup_integration(hass, mock_config_entry)
+    # Plugged in.
     state = hass.states.get(BASE_BATTERY)
-    assert state.state == "100"
+    assert state.state == STATE_UNKNOWN
     assert state.attributes["device_class"] == "battery"
     assert state.attributes["unit_of_measurement"] == PERCENTAGE
     assert state.attributes["state_class"] == "measurement"
@@ -319,11 +316,11 @@ async def test_base_battery(
 
     first, second = mock_client.async_get_bases.return_value
     mock_client.async_get_bases.return_value = [
-        replace(first, battery_level=None),
+        replace(first, power_mode="battery", battery_level=None),
         replace(second, battery_level=25),
     ]
     await _refresh(hass, freezer)
-    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNKNOWN
     assert hass.states.get(OTHER_BASE_BATTERY).state == "25"
 
 
@@ -398,22 +395,33 @@ async def test_processed_battery_event_refreshes(
     assert hass.states.get(entity_id).state == expected
 
 
-async def test_charging_base(
+async def test_base_battery_power_modes(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A charging Base reports no level; the last seen sensor has the power mode."""
+    """The Base battery sensor follows the power mode across refreshes.
+
+    Plugged in it is unknown but available, also if FluentPet still reports a
+    level; on battery, or without a known power mode, it shows the level.
+    """
     await setup_integration(hass, mock_config_entry)
-    first, second = mock_client.async_get_bases.return_value
-    mock_client.async_get_bases.return_value = [
-        replace(first, battery_level=None, power_mode="plugged_in"),
-        second,
-    ]
-    await _refresh(hass, freezer)
-    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
-    assert hass.states.get(PLUGGED_IN).attributes["power_mode"] == "plugged_in"
+    _, second = mock_client.async_get_bases.return_value
+    assert hass.states.get(OTHER_BASE_BATTERY).state == "50"
+
+    for power_mode, battery_level, expected in (
+        ("plugged_in", None, STATE_UNKNOWN),
+        ("plugged_in", 50, STATE_UNKNOWN),
+        ("battery", 50, "50"),
+        (None, 75, "75"),
+        ("unrecognized", 25, "25"),
+    ):
+        mock_client.async_get_bases.return_value = [
+            replace(second, power_mode=power_mode, battery_level=battery_level)
+        ]
+        await _refresh(hass, freezer)
+        assert hass.states.get(OTHER_BASE_BATTERY).state == expected, power_mode
 
 
 async def test_battery_unavailable_while_refresh_fails(
@@ -427,10 +435,12 @@ async def test_battery_unavailable_while_refresh_fails(
     mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
     await _refresh(hass, freezer)
     assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(OTHER_BASE_BATTERY).state == STATE_UNAVAILABLE
     assert hass.states.get(BUTTON_BATTERY).state == STATE_UNAVAILABLE
     mock_client.async_get_bases.side_effect = None
     await _refresh(hass, freezer)
-    assert hass.states.get(BASE_BATTERY).state == "100"
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNKNOWN
+    assert hass.states.get(OTHER_BASE_BATTERY).state == "50"
     assert hass.states.get(BUTTON_BATTERY).state == "75"
 
 
@@ -548,5 +558,5 @@ async def test_battery_sensor_incomplete_refresh(
     mock_client.async_get_buttons.side_effect = None
     mock_client.async_get_buttons.return_value = [outside, *rest]
     await _refresh(hass, freezer)
-    assert hass.states.get(BASE_BATTERY).state == "100"
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNKNOWN
     assert hass.states.get(BUTTON_BATTERY).state == "75"

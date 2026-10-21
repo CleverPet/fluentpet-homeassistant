@@ -1,0 +1,33 @@
+{
+  "id": "00000000-0000-4000-8000-000000000014",
+  "type": "base.updated",
+  "occurred_at": "2026-10-17T10:20:00.000Z",
+  "created_at": "2026-10-17T10:20:00.050Z",
+  "payload": {
+    "version": 1,
+    "household": {
+      "id": "hh_testhouseholdaaaaaaaaaaaaa",
+      "name": "Test Household"
+    },
+    "base": {
+      "id": "base_testbasetwoaaaaaaaaaaaaaaa",
+      "serial": "TESTSERIAL0002",
+      "name": null,
+      "fw_version": null,
+      "battery_level": null,
+      "power_mode": "plugged_in"
+    },
+    "default_learner": null,
+    "reason": "battery_reported",
+    "changes": {
+      "battery_level": [
+        50,
+        null
+      ],
+      "power_mode": [
+        "battery",
+        "plugged_in"
+      ]
+    }
+  }
+}

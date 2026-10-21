@@ -46,7 +46,7 @@ rules:
   docs-installation-parameters: done
   entity-unavailable:
     status: done
-    comment: Last seen sensors follow coordinator.last_update_success; press and last interaction entities are unavailable while refreshes fail and the webhook is not active, and apply events held meanwhile once available.
+    comment: Last seen, plugged in and battery sensors follow coordinator.last_update_success; press and last interaction entities are unavailable while refreshes fail and the webhook is not active, and apply events held meanwhile once available.
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
@@ -75,7 +75,7 @@ rules:
     comment: Every entity is primary; none is configuration or diagnostic.
   entity-device-class:
     status: done
-    comment: Press entities use the button event device class and last seen sensors the timestamp sensor device class; the last interaction sensor is text and has none.
+    comment: Press entities use the button event device class last seen sensors the timestamp sensor device class, plugged in sensors the plug binary sensor device class and battery sensors the battery sensor device class; the last interaction sensor is text and has none.
   entity-disabled-by-default:
     status: exempt
     comment: There are no noisy or rarely used entities.

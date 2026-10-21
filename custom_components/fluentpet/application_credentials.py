@@ -1,12 +1,26 @@
 """Application credentials platform for the FluentPet Connect integration."""
 
-from homeassistant.components.application_credentials import ClientCredential
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.config_entry_oauth2_flow import (
     LocalOAuth2ImplementationWithPkce,
 )
 
-from .const import OAUTH2_AUTHORIZE, OAUTH2_TOKEN
+from .const import CLIENT_ID, CLIENT_NAME, DOMAIN, OAUTH2_AUTHORIZE, OAUTH2_TOKEN
+
+
+async def async_import_public_credential(hass: HomeAssistant) -> None:
+    """Import the public FluentPet application credential, when it is defined.
+
+    Home Assistant skips the import when the credential exists already.
+    """
+    if CLIENT_ID:
+        await async_import_client_credential(
+            hass, DOMAIN, ClientCredential(CLIENT_ID, "", name=CLIENT_NAME)
+        )
 
 
 async def async_get_auth_implementation(

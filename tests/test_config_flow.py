@@ -408,6 +408,76 @@ async def test_reauth_not_admin(
     assert mock_config_entry.data["token"]["access_token"] == "mock-access-token"
 
 
+@pytest.fixture
+def public_client_id() -> Generator[None]:
+    """Ship the mock client id as the public client id of the integration."""
+    with patch(
+        "custom_components.fluentpet.application_credentials.CLIENT_ID", CLIENT_ID
+    ):
+        yield
+
+
+async def _assert_credential_imported(hass: HomeAssistant) -> None:
+    """Assert that the flow imported the public credential."""
+    implementations = await config_entry_oauth2_flow.async_get_implementations(
+        hass, DOMAIN
+    )
+    assert list(implementations) == [DOMAIN]
+    implementation = implementations[DOMAIN]
+    assert isinstance(
+        implementation, config_entry_oauth2_flow.LocalOAuth2ImplementationWithPkce
+    )
+    assert implementation.client_id == CLIENT_ID
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_fresh_install_imports_credential(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+) -> None:
+    """A first install signs in without the integration being set up before."""
+    assert "application_credentials" not in hass.config.components
+    mock_client.async_get_households.return_value = [
+        Household(id=HOUSEHOLD_ID, name="Test Household", admin=True)
+    ]
+    result = await _start(hass)
+
+    assert DOMAIN not in hass.config.components
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    await _assert_credential_imported(hass)
+    result = await _authorize(
+        hass, hass_client_no_auth, aioclient_mock, result, check_url=True
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["auth_implementation"] == DOMAIN
+
+
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_reauth_imports_credential(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Reauthentication imports the public credential when it is missing."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    await _assert_credential_imported(hass)
+    result = await _authorize(hass, hass_client_no_auth, aioclient_mock, result)
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.data["token"]["access_token"] == "mock-new-access-token"
+
+
 DEV_URL = "https://example.com/dev-api"
 
 

@@ -62,13 +62,17 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 @pytest.fixture(autouse=True)
 def no_shipped_client_id() -> Generator[None]:
     """Keep the shipped public client id out of tests; they use a mock one."""
-    with patch("custom_components.fluentpet.CLIENT_ID", ""):
+    with patch("custom_components.fluentpet.application_credentials.CLIENT_ID", ""):
         yield
 
 
 @pytest.fixture(autouse=True)
-async def setup_credentials(hass: HomeAssistant) -> None:
-    """Import the application credential."""
+async def setup_credentials(
+    hass: HomeAssistant, request: pytest.FixtureRequest
+) -> None:
+    """Import the application credential, unless the test is a fresh install."""
+    if request.node.get_closest_marker("fresh_install"):
+        return
     assert await async_setup_component(hass, "application_credentials", {})
     await async_import_client_credential(
         hass, DOMAIN, ClientCredential(CLIENT_ID, ""), DOMAIN

@@ -1,10 +1,6 @@
 """The FluentPet Connect integration."""
 
 from homeassistant.components import persistent_notification
-from homeassistant.components.application_credentials import (
-    ClientCredential,
-    async_import_client_credential,
-)
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
@@ -28,9 +24,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from . import cloudhook
 from .api import AsyncConfigEntryAuth, StaticTokenAuth, api_base_url
+from .application_credentials import async_import_public_credential
 from .const import (
-    CLIENT_ID,
-    CLIENT_NAME,
     CONF_HOUSEHOLD_ID,
     CONF_SCAN_INTERVAL,
     CONF_WEBHOOK_ENDPOINT_ID,
@@ -62,10 +57,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Import the public FluentPet application credential, when it is defined."""
-    if CLIENT_ID:
-        await async_import_client_credential(
-            hass, DOMAIN, ClientCredential(CLIENT_ID, "", name=CLIENT_NAME)
-        )
+    await async_import_public_credential(hass)
     return True
 
 

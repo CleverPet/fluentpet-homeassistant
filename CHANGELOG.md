@@ -114,3 +114,6 @@ All notable changes to this project are documented in this file.
   disabled press or last seen entity is no longer rebuilt on every update.
 - Presses held while their entity is unavailable are not stored as processed,
   so the feed fires them once after a restart.
+- Adding the integration on a fresh install no longer stops with a missing
+  application credential: setup and reauthentication add the FluentPet
+  application credential when it is missing, without a restart.

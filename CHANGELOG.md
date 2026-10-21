@@ -28,19 +28,18 @@ All notable changes to this project are documented in this file.
   unknown while FluentPet has not reported a power mode or reports one the
   integration does not know. A `base.updated` event (reason
   `battery_reported` or `power_mode_reported`) delivered by the webhook
-  updates it right away; while polling, the change shows up at the next
+  updates it within seconds; while polling, the change shows up at the next
   refresh.
 - Sensor platform: battery sensor per Base and per Button linked to a Base
   (device class battery, diagnostic), in the steps the FluentPet app shows
   (100, 75, 50, 25, 0). A Base battery sensor is unknown, and stays
-  available, while FluentPet reports no level, as it does while the Base
-  runs plugged in. A Button
-  battery sensor is unavailable while FluentPet reports no level; a
-  Button reports its level from its first press after FluentPet started
-  reporting Button levels. A Button's sensor is removed when it is unlinked
-  from its Base and comes back when it is linked again. An empty Button
-  battery reads as no level. A level change pushed as a `base.updated` or
-  `button.updated` event updates the sensor right away.
+  available, while FluentPet reports no level, as it does while the Base runs
+  plugged in. A Button battery sensor is unavailable while FluentPet reports
+  no level; a Button reports its level from its first press after FluentPet
+  started reporting Button levels. A Button's sensor is removed when it is
+  unlinked from its Base and comes back when it is linked again. An empty
+  Button battery reads as no level. A level change pushed as a `base.updated`
+  or `button.updated` event updates the sensor within seconds.
 - Push through a FluentPet household webhook, delivered to a Home Assistant
   Cloud cloudhook or the external https URL, with HMAC signature verification,
   a 5 minute timestamp window and deduplication. Deliveries relayed by Home

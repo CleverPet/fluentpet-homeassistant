@@ -156,10 +156,9 @@ A battery sensor is unavailable while refreshes from FluentPet fail.
 
 A Base battery sensor shows the level FluentPet reports, whatever the power
 mode. It is unknown, and stays available, whenever FluentPet reports no level
-for the Base: while it runs plugged in (FluentPet reports no level then),
-before it has reported a level, and while it has never reported a power mode
-and has no level. It shows the level again once FluentPet reports one, for
-example after the Base is unplugged.
+for the Base: while it runs plugged in (FluentPet reports no level then) and
+before it has reported a level. It shows the level again once FluentPet
+reports one, for example after the Base is unplugged.
 
 A Button battery sensor is also unavailable while FluentPet reports no
 battery level for the Button. A Button reports its level through its Base
@@ -175,8 +174,8 @@ The battery sensors have no attributes of their own. Whether a Base runs
 plugged in or on battery is its [Power sensor](#power-sensor).
 
 When the battery level of a Base or Button moves to another step, FluentPet
-sends a `base.updated` or `button.updated` event. Delivered by the webhook,
-it makes the integration read the Bases and Buttons right away, so the sensor
+sends a `base.updated` or `button.updated` event. Delivered by the webhook, it
+makes the integration read the Bases and Buttons within seconds, so the sensor
 follows without waiting for the safety poll. A delivery the webhook missed is
 caught by the next safety poll, and while polling the change shows up at the
 next refresh; see [Bases and Buttons](#bases-and-buttons).
@@ -372,12 +371,12 @@ are all read every refresh interval. In push mode the safety poll reads the
 Bases every 5 minutes; the Buttons and learners are read when FluentPet
 reports that a Base, Button, learner or teacher was added, changed or removed
 (for example a `base.updated` event when the battery level or power mode of a
-Base changes). Such an event delivered by the webhook reads them right away.
-One read from the feed costs no extra refresh: a polling refresh read them
-already, and a safety poll that finds such an event the webhook missed reads
-them once, in the same poll. A press or interaction delivered by the webhook
-moves the last seen time of its Base forward to when FluentPet stored the
-event, without a request. A later read with an older or unknown time does
+Base changes). Such an event delivered by the webhook reads them within
+seconds. One read from the feed costs no extra refresh: a polling refresh read
+them already, and a safety poll that finds such an event the webhook missed
+reads them once, in the same poll. A press or interaction delivered by the
+webhook moves the last seen time of its Base forward to when FluentPet stored
+the event, without a request. A later read with an older or unknown time does
 not move it back until Home Assistant restarts or the integration reloads.
 
 A press on a Button that Home Assistant does not know yet fires once the
@@ -519,7 +518,9 @@ lower while it is not plugged in, and not again until the level rises above
 was sent; create it under **Settings > Devices & services > Helpers**, or in
 YAML as below. The plugged in check reads the Power sensor; the battery
 sensor is unknown while the Base is plugged in, because FluentPet reports no
-level then. The levels are 100, 75, 50, 25 and 0, so `below: 26` means 25 or
+level then. A Power sensor that is unknown (the Base has never reported a
+power mode) counts as not plugged in, so the example still notifies on a low
+level. The levels are 100, 75, 50, 25 and 0, so `below: 26` means 25 or
 lower.
 
 ```yaml
@@ -735,8 +736,8 @@ Power sensor is unknown). The sensor stays available and shows the level once
 FluentPet reports one.
 
 **A new Button has no entity.** New Buttons are added at the next refresh, or
-right away when FluentPet reports the change. Reload the integration to force
-a refresh.
+within seconds when the webhook delivers the change. Reload the integration to
+force a refresh.
 
 ### Debug logging
 

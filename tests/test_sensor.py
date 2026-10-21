@@ -238,7 +238,7 @@ async def test_last_seen(
 ) -> None:
     """Each Base has a last seen timestamp without attributes of its own.
 
-    The power mode is the plugged in binary sensor, not an attribute.
+    The power mode is the Power binary sensor, not an attribute.
     """
     await setup_integration(hass, mock_config_entry)
     plugged_in = hass.states.get(PLUGGED_IN)

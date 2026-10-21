@@ -196,7 +196,6 @@ async def test_unknown_power_mode(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
     power_mode: str | None,
 ) -> None:
     """A Base without a known power mode is unknown; its level still shows."""

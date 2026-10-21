@@ -18,7 +18,7 @@
       "power_mode": "battery"
     },
     "default_learner": null,
-    "reason": "power_mode_reported",
+    "reason": "battery_reported",
     "changes": {
       "battery_level": [
         null,

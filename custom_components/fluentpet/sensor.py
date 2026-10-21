@@ -23,8 +23,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STATE_MAX_LENGTH, signal_interaction
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
-from .entity import FluentPetCoordinatorEntity, FluentPetPushEntity, device_info
-from .fluentpet_api import Base, Button, InteractionUpdatedData
+from .entity import (
+    FluentPetBaseEntity,
+    FluentPetCoordinatorEntity,
+    FluentPetPushEntity,
+    device_info,
+)
+from .fluentpet_api import Button, InteractionUpdatedData
 
 PARALLEL_UPDATES = 0
 
@@ -198,7 +203,7 @@ class FluentPetLastInteractionSensor(FluentPetPushEntity, RestoreSensor):
         self.async_write_ha_state()
 
 
-class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
+class FluentPetBaseLastSeenSensor(FluentPetBaseEntity, SensorEntity):
     """When FluentPet last heard from a Base."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -206,16 +211,7 @@ class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator: FluentPetCoordinator, base_id: str) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
-        self.base_id = base_id
-        self._attr_unique_id = f"{base_id}_last_seen"
-        self._attr_device_info = device_info(base_id)
-
-    @property
-    @override
-    def available(self) -> bool:
-        """Return whether the last refresh succeeded and returned the Base."""
-        return super().available and self.base_id in self.coordinator.data.bases
+        super().__init__(coordinator, base_id, "last_seen")
 
     @property
     @override
@@ -224,11 +220,10 @@ class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
         return self.coordinator.data.bases[self.base_id].last_online_at
 
 
-class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
+class FluentPetBatterySensor(SensorEntity):
     """The battery level of a Base or button, in percent.
 
     FluentPet reports the level in the steps of its app (100, 75, 50, 25 and 0).
-    Unavailable while refreshes fail or the device is not returned.
     """
 
     _attr_device_class = SensorDeviceClass.BATTERY
@@ -236,53 +231,44 @@ class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: FluentPetCoordinator, device_id: str) -> None:
+
+class FluentPetBaseBatterySensor(FluentPetBaseEntity, FluentPetBatterySensor):
+    """The battery level of a Base.
+
+    Unknown while FluentPet reports no level, as it does while the Base runs
+    plugged in; it stays available then, like the other entities of the Base.
+    """
+
+    def __init__(self, coordinator: FluentPetCoordinator, base_id: str) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
-        self.device_id = device_id
-        self._attr_unique_id = f"{device_id}_battery"
-        self._attr_device_info = device_info(device_id)
-
-    @property
-    def device(self) -> Base | Button | None:
-        """Return the Base or button of the last refresh, or None."""
-        raise NotImplementedError
-
-    @property
-    @override
-    def available(self) -> bool:
-        """Return whether the last refresh succeeded and returned the device."""
-        return super().available and self.device is not None
+        super().__init__(coordinator, base_id, "battery")
 
     @property
     @override
     def native_value(self) -> int | None:
         """Return the battery level."""
-        device = self.device
-        return device.battery_level if device is not None else None
+        return self.coordinator.data.bases[self.base_id].battery_level
 
 
-class FluentPetBaseBatterySensor(FluentPetBatterySensor):
-    """The battery level of a Base.
-
-    Unknown while FluentPet reports no level, as it does while the Base runs
-    plugged in; it stays available then, like the other sensors of the Base.
-    """
-
-    @property
-    @override
-    def device(self) -> Base | None:
-        """Return the Base of the last refresh, or None."""
-        return self.coordinator.data.bases.get(self.device_id)
-
-
-class FluentPetButtonBatterySensor(FluentPetBatterySensor):
+class FluentPetButtonBatterySensor(FluentPetCoordinatorEntity, FluentPetBatterySensor):
     """The battery level of a button, as its Base reports it.
 
-    Unavailable also while FluentPet reports no level: for a button that has not
-    been pressed since it started reporting button levels, or whose battery is
-    empty.
+    Unavailable while refreshes fail, the button is not returned, or FluentPet
+    reports no level: for a button that has not been pressed since it started
+    reporting button levels, or whose battery is empty.
     """
+
+    def __init__(self, coordinator: FluentPetCoordinator, button_id: str) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self.button_id = button_id
+        self._attr_unique_id = f"{button_id}_battery"
+        self._attr_device_info = device_info(button_id)
+
+    @property
+    def button(self) -> Button | None:
+        """Return the button of the last refresh, or None."""
+        return self.coordinator.data.buttons.get(self.button_id)
 
     @property
     @override
@@ -290,12 +276,13 @@ class FluentPetButtonBatterySensor(FluentPetBatterySensor):
         """Return whether the last refresh succeeded and returned a level."""
         return (
             super().available
-            and (button := self.device) is not None
+            and (button := self.button) is not None
             and button.battery_level is not None
         )
 
     @property
     @override
-    def device(self) -> Button | None:
-        """Return the button of the last refresh, or None."""
-        return self.coordinator.data.buttons.get(self.device_id)
+    def native_value(self) -> int | None:
+        """Return the battery level."""
+        button = self.button
+        return button.battery_level if button is not None else None

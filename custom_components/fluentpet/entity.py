@@ -23,6 +23,28 @@ class FluentPetCoordinatorEntity(CoordinatorEntity[FluentPetCoordinator]):
     _attr_has_entity_name = True
 
 
+class FluentPetBaseEntity(FluentPetCoordinatorEntity):
+    """An entity of a Base, updated by the coordinator.
+
+    Available while the last refresh succeeded and returned the Base.
+    """
+
+    def __init__(
+        self, coordinator: FluentPetCoordinator, base_id: str, key: str
+    ) -> None:
+        """Initialize the entity; key is the suffix of its unique id."""
+        super().__init__(coordinator)
+        self.base_id = base_id
+        self._attr_unique_id = f"{base_id}_{key}"
+        self._attr_device_info = device_info(base_id)
+
+    @property
+    @override
+    def available(self) -> bool:
+        """Return whether the last refresh succeeded and returned the Base."""
+        return super().available and self.base_id in self.coordinator.data.bases
+
+
 class FluentPetPushEntity(FluentPetCoordinatorEntity):
     """An entity updated by household events, from the webhook or the feed.
 

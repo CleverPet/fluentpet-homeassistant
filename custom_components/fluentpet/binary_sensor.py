@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import LOGGER, POWER_MODE_BATTERY, POWER_MODE_PLUGGED_IN
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
-from .entity import FluentPetCoordinatorEntity, device_info
+from .entity import FluentPetBaseEntity
 
 PARALLEL_UPDATES = 0
 
@@ -47,7 +47,7 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new))
 
 
-class FluentPetBasePowerSensor(FluentPetCoordinatorEntity, BinarySensorEntity):
+class FluentPetBasePowerSensor(FluentPetBaseEntity, BinarySensorEntity):
     """Whether a Base runs plugged in (on) or on battery (off).
 
     Unknown while the Base has not reported a power mode, or reports one this
@@ -60,33 +60,34 @@ class FluentPetBasePowerSensor(FluentPetCoordinatorEntity, BinarySensorEntity):
 
     def __init__(self, coordinator: FluentPetCoordinator, base_id: str) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
-        self.base_id = base_id
-        self._attr_unique_id = f"{base_id}_power"
-        self._attr_device_info = device_info(base_id)
+        super().__init__(coordinator, base_id, "power")
         # Unrecognized power modes already logged, so each is logged once.
         self._logged_modes: set[str] = set()
+        self._async_update_is_on()
 
-    @property
+    @callback
     @override
-    def available(self) -> bool:
-        """Return whether the last refresh succeeded and returned the Base."""
-        return super().available and self.base_id in self.coordinator.data.bases
+    def _handle_coordinator_update(self) -> None:
+        """Update the state from the Bases of the refresh, then write it."""
+        self._async_update_is_on()
+        super()._handle_coordinator_update()
 
-    @property
-    @override
-    def is_on(self) -> bool | None:
-        """Return whether the Base runs plugged in, or None when unknown."""
-        power_mode = self.coordinator.data.bases[self.base_id].power_mode
+    @callback
+    def _async_update_is_on(self) -> None:
+        """Set the state from the power mode of the Base, when it was returned."""
+        if (base := self.coordinator.data.bases.get(self.base_id)) is None:
+            return
+        power_mode = base.power_mode
         if power_mode == POWER_MODE_PLUGGED_IN:
-            return True
-        if power_mode == POWER_MODE_BATTERY:
-            return False
-        if power_mode is not None and power_mode not in self._logged_modes:
-            self._logged_modes.add(power_mode)
-            LOGGER.debug(
-                "Base %s reports an unrecognized power mode %r",
-                self.base_id,
-                power_mode,
-            )
-        return None
+            self._attr_is_on = True
+        elif power_mode == POWER_MODE_BATTERY:
+            self._attr_is_on = False
+        else:
+            self._attr_is_on = None
+            if power_mode is not None and power_mode not in self._logged_modes:
+                self._logged_modes.add(power_mode)
+                LOGGER.debug(
+                    "Base %s reports an unrecognized power mode %r",
+                    self.base_id,
+                    power_mode,
+                )

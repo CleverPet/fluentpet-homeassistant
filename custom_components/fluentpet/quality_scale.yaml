@@ -46,7 +46,7 @@ rules:
   docs-installation-parameters: done
   entity-unavailable:
     status: done
-    comment: Last seen sensors follow coordinator.last_update_success; press and last interaction entities are unavailable while refreshes fail and the webhook is not active, and apply events held meanwhile once available.
+    comment: Last seen, power and battery sensors are unavailable while refreshes fail (coordinator.last_update_success) or the last read did not return their Base or Button; Button battery sensors are also unavailable while FluentPet reports no level, and a Base battery sensor without a level is unknown instead. Press and last interaction entities are unavailable while refreshes fail and the webhook is not active, and apply events held meanwhile once available.
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
@@ -71,11 +71,11 @@ rules:
   docs-use-cases: done
   dynamic-devices: done
   entity-category:
-    status: exempt
-    comment: Every entity is primary; none is configuration or diagnostic.
+    status: done
+    comment: Battery sensors are diagnostic; the press, last interaction, last seen and power entities are primary.
   entity-device-class:
     status: done
-    comment: Press entities use the button event device class and last seen sensors the timestamp sensor device class; the last interaction sensor is text and has none.
+    comment: Press entities use the button event device class, last seen sensors the timestamp sensor device class, power sensors the plug binary sensor device class and battery sensors the battery sensor device class; the last interaction sensor is text and has none.
   entity-disabled-by-default:
     status: exempt
     comment: There are no noisy or rarely used entities.

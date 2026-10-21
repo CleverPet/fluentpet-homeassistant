@@ -96,7 +96,6 @@
     'attributes': ReadOnlyDict({
       <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
       <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Base TESTSERIAL0002 Last seen',
-      'power_mode': 'battery',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.base_testserial0002_last_seen',
@@ -268,7 +267,7 @@
     'last_changed': <ANY>,
     'last_reported': <ANY>,
     'last_updated': <ANY>,
-    'state': '100',
+    'state': 'unknown',
   })
 # ---
 # name: test_entities[sensor.test_base_last_seen-entry]
@@ -313,7 +312,6 @@
     'attributes': ReadOnlyDict({
       <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
       <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Base Last seen',
-      'power_mode': 'plugged_in',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.test_base_last_seen',

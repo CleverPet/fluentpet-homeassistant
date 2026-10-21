@@ -141,7 +141,7 @@ async def test_get_bases(
     assert bases[0].last_online_at == datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
     assert bases[0].fw_version == "2.4.20260901"
     assert bases[0].power_mode == "plugged_in"
-    assert bases[0].battery_level == 100
+    assert bases[0].battery_level is None
     assert bases[0].battery_updated_at == datetime(2026, 10, 17, 11, 30, tzinfo=UTC)
     assert bases[1].name is None
     assert bases[1].connected is False

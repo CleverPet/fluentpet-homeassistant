@@ -51,6 +51,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import OAuth2TokenRequestConnectionError
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import REQUEST_REFRESH_DEFAULT_COOLDOWN
 from homeassistant.util import dt as dt_util
 from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
 
@@ -675,6 +676,69 @@ async def test_battery_delivery_updates_sensor(
     await hass.async_block_till_done()
     assert mock_client.async_get_buttons.await_count == buttons_read + 1
     assert hass.states.get(entity_id).state == expected
+
+
+def _base_updated_body(name: str, reason: str) -> bytes:
+    """Return the body of a base.updated fixture with the given reason."""
+    data = load_json_fixture(f"events/{name}.json")
+    data["payload"]["reason"] = reason
+    data["created_at"] = dt_util.utcnow().isoformat()
+    return json.dumps(data).encode()
+
+
+@pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize("reason", ["battery_reported", "power_mode_reported"])
+async def test_power_mode_delivery_updates_sensors(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    reason: str,
+) -> None:
+    """A delivered base.updated plugging a Base in and out updates its sensors.
+
+    Plugged in, the battery sensor is unknown but available; back on battery it
+    shows the level again. Each delivery reads the Bases without waiting for the
+    safety poll.
+    """
+    plug = "binary_sensor.base_testserial0002_power"
+    battery = "sensor.base_testserial0002_battery"
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    assert hass.states.get(plug).state == "off"
+    assert hass.states.get(battery).state == "50"
+    first, second = mock_client.async_get_bases.return_value
+
+    mock_client.async_get_bases.return_value = [
+        first,
+        replace(second, power_mode="plugged_in", battery_level=None),
+    ]
+    body = _base_updated_body("base_plugged_in", reason)
+    headers = signed_headers(
+        body,
+        event_type="base.updated",
+        delivery="00000000-0000-4000-8000-00000000d0a1",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get(plug).state == "on"
+    assert hass.states.get(battery).state == STATE_UNKNOWN
+
+    # Past the cooldown of the requested refresh.
+    await _wait(hass, freezer, timedelta(seconds=REQUEST_REFRESH_DEFAULT_COOLDOWN + 1))
+    mock_client.async_get_bases.return_value = [first, second]
+    body = _base_updated_body("base_unplugged", reason)
+    headers = signed_headers(
+        body,
+        event_type="base.updated",
+        delivery="00000000-0000-4000-8000-00000000d0a2",
+    )
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get(plug).state == "off"
+    assert hass.states.get(battery).state == "50"
 
 
 async def _deliver_cloudhook(

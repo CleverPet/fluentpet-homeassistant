@@ -9,7 +9,7 @@
       "connected": true,
       "last_online_at": "2026-10-17T12:00:00.000Z",
       "power_mode": "plugged_in",
-      "battery_level": 100,
+      "battery_level": null,
       "battery_updated_at": "2026-10-17T11:30:00.000Z"
     },
     {

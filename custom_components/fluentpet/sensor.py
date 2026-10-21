@@ -23,8 +23,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STATE_MAX_LENGTH, signal_interaction
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
-from .entity import FluentPetCoordinatorEntity, FluentPetPushEntity, device_info
-from .fluentpet_api import Base, Button, InteractionUpdatedData
+from .entity import (
+    FluentPetBaseEntity,
+    FluentPetCoordinatorEntity,
+    FluentPetPushEntity,
+    device_info,
+)
+from .fluentpet_api import Button, InteractionUpdatedData
 
 PARALLEL_UPDATES = 0
 
@@ -33,7 +38,6 @@ ATTR_PRESS_COUNT = "press_count"
 ATTR_OCCURRED_AT = "occurred_at"
 ATTR_PRESSED_BY = "pressed_by"
 ATTR_INTERACTION_ID = "interaction_id"
-ATTR_POWER_MODE = "power_mode"
 
 
 async def async_setup_entry(
@@ -199,28 +203,15 @@ class FluentPetLastInteractionSensor(FluentPetPushEntity, RestoreSensor):
         self.async_write_ha_state()
 
 
-class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
-    """When FluentPet last heard from a Base, with its power mode.
-
-    The power mode is recorded with the state: it changes rarely (plugging in or
-    out), and its history is what shows when a Base ran on battery.
-    """
+class FluentPetBaseLastSeenSensor(FluentPetBaseEntity, SensorEntity):
+    """When FluentPet last heard from a Base."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_translation_key = "last_seen"
 
     def __init__(self, coordinator: FluentPetCoordinator, base_id: str) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
-        self.base_id = base_id
-        self._attr_unique_id = f"{base_id}_last_seen"
-        self._attr_device_info = device_info(base_id)
-
-    @property
-    @override
-    def available(self) -> bool:
-        """Return whether the last refresh succeeded and returned the Base."""
-        return super().available and self.base_id in self.coordinator.data.bases
+        super().__init__(coordinator, base_id, "last_seen")
 
     @property
     @override
@@ -228,19 +219,12 @@ class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
         """Return when FluentPet last heard from the Base."""
         return self.coordinator.data.bases[self.base_id].last_online_at
 
-    @property
-    @override
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the power mode of the Base."""
-        return {ATTR_POWER_MODE: self.coordinator.data.bases[self.base_id].power_mode}
 
+class FluentPetBatteryAttributes(SensorEntity):
+    """The attributes shared by the battery sensors of Bases and buttons.
 
-class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
-    """The battery level of a Base or button, in percent.
-
-    FluentPet reports the level in the steps of its app (100, 75, 50, 25 and 0).
-    Unavailable while refreshes fail, the device is not returned, or FluentPet
-    reports no level.
+    The level is in percent, in the steps of the FluentPet app (100, 75, 50, 25
+    and 0).
     """
 
     _attr_device_class = SensorDeviceClass.BATTERY
@@ -248,17 +232,46 @@ class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator: FluentPetCoordinator, device_id: str) -> None:
+
+class FluentPetBaseBatterySensor(FluentPetBaseEntity, FluentPetBatteryAttributes):
+    """The battery level of a Base.
+
+    Unknown while FluentPet reports no level, as it does while the Base runs
+    plugged in; it stays available then, like the other entities of the Base.
+    """
+
+    def __init__(self, coordinator: FluentPetCoordinator, base_id: str) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
-        self.device_id = device_id
-        self._attr_unique_id = f"{device_id}_battery"
-        self._attr_device_info = device_info(device_id)
+        super().__init__(coordinator, base_id, "battery")
 
     @property
-    def device(self) -> Base | Button | None:
-        """Return the Base or button of the last refresh, or None."""
-        raise NotImplementedError
+    @override
+    def native_value(self) -> int | None:
+        """Return the battery level."""
+        return self.coordinator.data.bases[self.base_id].battery_level
+
+
+class FluentPetButtonBatterySensor(
+    FluentPetCoordinatorEntity, FluentPetBatteryAttributes
+):
+    """The battery level of a button, as its Base reports it.
+
+    Unavailable while refreshes fail, the button is not returned, or FluentPet
+    reports no level: for a button that has not been pressed since it started
+    reporting button levels, or whose battery is empty.
+    """
+
+    def __init__(self, coordinator: FluentPetCoordinator, button_id: str) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self.button_id = button_id
+        self._attr_unique_id = f"{button_id}_battery"
+        self._attr_device_info = device_info(button_id)
+
+    @property
+    def button(self) -> Button | None:
+        """Return the button of the last refresh, or None."""
+        return self.coordinator.data.buttons.get(self.button_id)
 
     @property
     @override
@@ -266,41 +279,13 @@ class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
         """Return whether the last refresh succeeded and returned a level."""
         return (
             super().available
-            and (device := self.device) is not None
-            and device.battery_level is not None
+            and (button := self.button) is not None
+            and button.battery_level is not None
         )
 
     @property
     @override
     def native_value(self) -> int | None:
         """Return the battery level."""
-        device = self.device
-        return device.battery_level if device is not None else None
-
-
-class FluentPetBaseBatterySensor(FluentPetBatterySensor):
-    """The battery level of a Base.
-
-    Its power mode is an attribute of the last seen sensor, which stays available
-    while the Base reports no level (as it may while it charges).
-    """
-
-    @property
-    @override
-    def device(self) -> Base | None:
-        """Return the Base of the last refresh, or None."""
-        return self.coordinator.data.bases.get(self.device_id)
-
-
-class FluentPetButtonBatterySensor(FluentPetBatterySensor):
-    """The battery level of a button, as its Base reports it.
-
-    FluentPet reports no level for a button that has not been pressed since it
-    started reporting button levels, or whose battery is empty.
-    """
-
-    @property
-    @override
-    def device(self) -> Button | None:
-        """Return the button of the last refresh, or None."""
-        return self.coordinator.data.buttons.get(self.device_id)
+        button = self.button
+        return button.battery_level if button is not None else None

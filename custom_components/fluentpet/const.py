@@ -73,6 +73,10 @@ VERIFY_SLACK: Final = timedelta(seconds=30)
 # FluentPet still counts failed deliveries.
 WEBHOOK_DELIVERY_WINDOW: Final = timedelta(minutes=10)
 
+# The power modes of a Base, as FluentPet sends them in Base.power_mode.
+POWER_MODE_BATTERY: Final = "battery"
+POWER_MODE_PLUGGED_IN: Final = "plugged_in"
+
 EVENT_PRESS: Final = "press"
 ISSUE_WEBHOOK_DISABLED: Final = "webhook_disabled"
 ISSUE_WEBHOOK_LIMIT: Final = "webhook_limit"

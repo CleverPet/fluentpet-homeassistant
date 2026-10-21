@@ -343,6 +343,7 @@ async def test_button_model_updated_on_existing_device(
     entity_registry: er.EntityRegistry,
 ) -> None:
     """A button device registered with the old model keeps its id and entity."""
+    # Not setup_integration: the entry must exist before the device is registered.
     mock_config_entry.add_to_hass(hass)
     old = device_registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
@@ -350,6 +351,15 @@ async def test_button_model_updated_on_existing_device(
         manufacturer="FluentPet",
         model="Button",
     )
+    old_entity = entity_registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        f"{OUTSIDE_ID}_press",
+        config_entry=mock_config_entry,
+        device_id=old.id,
+        suggested_object_id="outside_press",
+    )
+    assert old_entity.entity_id == PRESS_ENTITY
 
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -362,6 +372,8 @@ async def test_button_model_updated_on_existing_device(
     assert device.model == "Connect Button"
     entity = entity_registry.async_get(PRESS_ENTITY)
     assert entity is not None
+    assert entity.id == old_entity.id
+    assert entity.unique_id == f"{OUTSIDE_ID}_press"
     assert entity.device_id == old.id
 
 

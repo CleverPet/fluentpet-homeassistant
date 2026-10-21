@@ -375,6 +375,11 @@ async def test_button_model_updated_on_existing_device(
     assert entity.id == old_entity.id
     assert entity.unique_id == f"{OUTSIDE_ID}_press"
     assert entity.device_id == old.id
+    assert [
+        entry.id
+        for entry in er.async_entries_for_device(entity_registry, old.id)
+        if entry.domain == "event"
+    ] == [old_entity.id]
 
 
 async def test_stale_and_new_devices(

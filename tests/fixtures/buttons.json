@@ -8,7 +8,8 @@
       "serial": "TESTBTNSER01",
       "audio_id": "aud_testaudiooutsideaaaaaaaaaa",
       "battery_level": 75,
-      "battery_updated_at": "2026-10-17T11:50:00.000Z"
+      "battery_updated_at": "2026-10-17T11:50:00.000Z",
+      "firmware_version": "1.1.0"
     },
     {
       "id": "btn_testbuttonplayaaaaaaaaaaaa",
@@ -18,7 +19,8 @@
       "serial": "TESTBTNSER02",
       "audio_id": null,
       "battery_level": null,
-      "battery_updated_at": null
+      "battery_updated_at": null,
+      "firmware_version": null
     },
     {
       "id": "btn_testbuttonwalkaaaaaaaaaaaa",
@@ -28,7 +30,8 @@
       "serial": null,
       "audio_id": null,
       "battery_level": null,
-      "battery_updated_at": null
+      "battery_updated_at": null,
+      "firmware_version": null
     }
   ]
 }

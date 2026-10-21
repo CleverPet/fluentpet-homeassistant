@@ -58,6 +58,9 @@ and its `FluentPetParseError` passed to the callback instead of failing the whol
 `Base` carries `last_online_at`, `power_mode` (`"plugged_in"` or `"battery"`, another string kept
 as is), `battery_level` (snapped by FluentPet to 100, 75, 50, 25 or 0) and `battery_updated_at`,
 each `None` when unknown. A `Button` carries `battery_level` and `battery_updated_at` the same way.
+A `Base` and a `Button` carry `firmware_version`, the public name of a FluentPet firmware release
+such as `"1.1.0"` (a display string, not a comparable version), or `None` before the first report
+or when the installed build is not a published release.
 
 Errors are `FluentPetError` subclasses: `FluentPetAuthError` (401), `FluentPetForbiddenError`
 (403, for example a member who is not the household admin reading webhooks or events),

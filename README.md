@@ -731,8 +731,8 @@ battery level for it yet. A Button reports its level when it is pressed, so
 press it once. A Button battery sensor that becomes unavailable after showing
 a level can mean the battery is empty and needs replacing: FluentPet reports
 an empty Button battery as no level. Otherwise the last refresh from
-FluentPet failed or the last read did not return the Base or Button; check
-the logs as above.
+FluentPet failed or the last read did not return the Button (for a Base
+battery sensor, the Base); check the logs as above.
 
 **A Base battery sensor is unknown.** FluentPet reports no level for the
 Base. It reports none while the Base runs plugged in (its Power sensor is

@@ -630,7 +630,7 @@ class FluentPetWebhookManager:
                 "Could not read the body of FluentPet webhook delivery %s: %s",
                 delivery,
                 # aiohttp's payload errors span lines; keep the warning on one.
-                " ".join(str(err).split()),
+                " ".join(str(err).split()) or type(err).__name__,
             )
             return web.Response(status=HTTPStatus.BAD_REQUEST)
         secret = self.entry.data.get(CONF_WEBHOOK_SECRET)

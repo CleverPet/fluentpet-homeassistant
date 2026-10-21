@@ -864,7 +864,10 @@ async def test_disconnected_body_rejected(
     await hass.async_block_till_done()
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
     assert registered_entry.runtime_data.webhook.last_delivery is None
-    assert "Could not read the body of FluentPet webhook delivery" in caplog.text
+    assert (
+        "Could not read the body of FluentPet webhook delivery "
+        "00000000-0000-4000-8000-00000000d001: reset"
+    ) in caplog.text
     assert "Error processing webhook" not in caplog.text
 
 

@@ -129,7 +129,7 @@
         },
         "data_description": {
           "prefer_cloudhook": "Receive events through a Home Assistant Cloud webhook when you have a subscription, instead of your external URL.",
-          "scan_interval": "Seconds between refreshes of the Bases, buttons and event feed. With a webhook, events arrive sooner."
+          "scan_interval": "Fallback when push is unavailable: seconds between refreshes of the Bases, buttons, learners and event feed while there is no usable https URL (Home Assistant Cloud or an external https URL), FluentPet refused, disabled or fails to deliver to the webhook, or the last webhook check failed. While the webhook delivers, events are pushed and the event feed and the Bases are checked every 5 minutes."
         },
         "sections": {
           "advanced": {

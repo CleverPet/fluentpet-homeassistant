@@ -35,11 +35,13 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
+from homeassistant.util import dt as dt_util
 
 from .common import load_json_fixture, setup_integration
 from .conftest import HOUSEHOLD_ID, TAIL_CURSOR, buttons, empty_page
 
 PRESS_ENTITY = "event.outside_press"
+OUTSIDE_ID = "btn_testbuttonoutsideaaaaaaaaa"
 LAST_SEEN = "2026-10-17T12:00:00+00:00"
 SENSOR_ENTITY = "sensor.test_household_last_interaction"
 NEW_BUTTON = Button(
@@ -66,7 +68,7 @@ def _press(event_id: str, button_id: str) -> Event:
 
 
 async def _refresh(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int = 31
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int = 61
 ) -> None:
     """Move time past the refresh interval."""
     freezer.tick(timedelta(seconds=seconds))
@@ -191,7 +193,7 @@ async def test_backoff(
     coordinator = mock_config_entry.runtime_data.coordinator
     mock_client.async_get_bases.side_effect = error
 
-    expected = [60, 120, 240, 480, 600, 600]
+    expected = [120, 240, 480, 600, 600]
     for seconds in expected:
         await _refresh(
             hass, freezer, int(coordinator.update_interval.total_seconds()) + 1
@@ -201,7 +203,7 @@ async def test_backoff(
 
     mock_client.async_get_bases.side_effect = None
     await _refresh(hass, freezer, 601)
-    assert coordinator.update_interval == timedelta(seconds=30)
+    assert coordinator.update_interval == timedelta(seconds=60)
     assert hass.states.get("sensor.test_base_last_seen").state == LAST_SEEN
 
 
@@ -216,7 +218,7 @@ async def test_connection_error_keeps_interval(
     coordinator = mock_config_entry.runtime_data.coordinator
     mock_client.async_get_buttons.side_effect = FluentPetConnectionError("boom")
     await _refresh(hass, freezer)
-    assert coordinator.update_interval == timedelta(seconds=30)
+    assert coordinator.update_interval == timedelta(seconds=60)
     assert not coordinator.last_update_success
 
 
@@ -255,21 +257,32 @@ async def test_feed_forbidden(
     assert mock_config_entry.runtime_data.coordinator.last_update_success
 
 
-async def test_lifecycle_event_from_feed_refreshes(
+async def test_lifecycle_event_in_full_refresh_no_second_round(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A lifecycle event read from the feed requests a refresh."""
+    """Lifecycle events read by a full refresh request no other refresh.
+
+    That refresh read the resources itself.
+    """
     await setup_integration(hass, mock_config_entry)
     mock_client.async_get_events.side_effect = [
-        EventPage((_event("base_updated"),), "AAAAAAAAAAtestcursor00000014"),
-        EventPage((), "AAAAAAAAAAtestcursor00000014"),
+        EventPage(
+            (_event("base_updated"), _event("button_updated")),
+            "AAAAAAAAAAtestcursor00000014",
+        ),
     ]
     await _refresh(hass, freezer)
+    assert mock_client.async_get_bases.await_count == 2
+    assert mock_client.async_get_events.await_count == 2
+    mock_client.async_get_events.side_effect = empty_page
     await _refresh(hass, freezer, 11)
-    assert mock_client.async_get_bases.await_count >= 3
+    assert mock_client.async_get_bases.await_count == 2
+    assert mock_client.async_get_buttons.await_count == 2
+    assert mock_client.async_get_learners.await_count == 2
+    assert mock_client.async_get_events.await_count == 2
 
 
 async def test_devices(
@@ -400,17 +413,22 @@ async def test_press_for_button_that_never_appears(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A press of a button the household does not return is dropped."""
+    """A feed press of a button the household does not return is dropped.
+
+    The refresh that read it read the buttons after it, so the press is dropped
+    in that refresh, without a second round.
+    """
     await setup_integration(hass, mock_config_entry)
     processor = mock_config_entry.runtime_data.coordinator.processor
     mock_client.async_get_events.side_effect = [
         EventPage((_press("00000000-0000-4000-8000-0000000000f2", "btn_gone"),), "c1"),
         EventPage((), "c1"),
-        EventPage((), "c1"),
     ]
     await _refresh(hass, freezer)
-    await _refresh(hass, freezer, 11)
     assert processor.pending_count == 0
+    assert mock_client.async_get_buttons.await_count == 2
+    await _refresh(hass, freezer, 11)
+    assert mock_client.async_get_buttons.await_count == 2
 
 
 async def test_duplicate_feed_event_fires_once(
@@ -562,7 +580,7 @@ async def test_rate_limit_retry_after(
     )
     await _refresh(hass, freezer)
     assert coordinator.last_exception.retry_after == 45
-    assert coordinator.update_interval == timedelta(seconds=60)
+    assert coordinator.update_interval == timedelta(seconds=120)
     assert mock_client.async_get_bases.await_count == 2
 
     await _refresh(hass, freezer, 40)
@@ -602,6 +620,31 @@ async def test_feed_forbidden_repair_and_recovery(
     assert "is readable again" in caplog.text
     await _refresh(hass, freezer)
     assert mock_client.async_get_events.await_count == calls + 3
+
+
+async def test_backlog_after_forbidden_feed_replayed(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The backlog read once a forbidden feed is readable again is replayed."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    assert not coordinator.catching_up
+    mock_client.async_get_events.side_effect = FluentPetForbiddenError(
+        403, "not allowed", None
+    )
+    await _refresh(hass, freezer)
+    assert coordinator.last_update_success
+    assert coordinator.catching_up
+
+    mock_client.async_get_events.side_effect = [
+        EventPage((_press("00000000-0000-4000-8000-0000000000d1", OUTSIDE_ID),), "c1"),
+    ]
+    await _refresh(hass, freezer, 5 * 60)
+    assert hass.states.get(PRESS_ENTITY).attributes["replayed"] is True
+    assert not coordinator.catching_up
 
 
 async def test_tail_forbidden_at_setup_then_admin(
@@ -1002,7 +1045,7 @@ async def test_departure_in_failed_refresh_kept(
     assert entity_registry.async_get(entity_id) is not None
 
     mock_client.async_get_events.side_effect = empty_page
-    await _refresh(hass, freezer, 61)
+    await _refresh(hass, freezer, 121)
     assert coordinator.last_update_success
     assert (
         device_registry.async_get_device_by_identifier((DOMAIN, item_id), entry_id)
@@ -1057,3 +1100,117 @@ async def test_skipped_base_not_added_twice(
     ]
     assert len(entries) == 1
     assert hass.states.get("sensor.test_base_last_seen").state == LAST_SEEN
+
+
+async def test_feed_page_limit_per_refresh(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A refresh reads at most FEED_MAX_PAGES pages; the next one continues.
+
+    The catch-up lasts until a refresh reads the feed to its end.
+    """
+
+    def _full_page(*args: Any, since: str | None = None, **kwargs: Any) -> EventPage:
+        index = int((since or TAIL_CURSOR)[-2:])
+        return EventPage(
+            tuple(
+                _press(
+                    f"00000000-0000-4000-8000-{index:06d}{offset:06d}",
+                    "btn_testbuttonplayaaaaaaaaaaaa",
+                )
+                for offset in range(100)
+            ),
+            f"AAAAAAAAAAtestcursor000000{index + 1:02d}",
+        )
+
+    mock_client.async_get_events.side_effect = _full_page
+    with patch("custom_components.fluentpet.coordinator.FEED_MAX_PAGES", 2):
+        await setup_integration(hass, mock_config_entry)
+    assert mock_config_entry.runtime_data.coordinator.last_update_success
+    assert mock_client.async_get_events.await_count == 2
+    assert (
+        mock_config_entry.runtime_data.coordinator.cursor
+        == "AAAAAAAAAAtestcursor00000015"
+    )
+    # The feed was not read to its end: still catching up.
+    assert mock_config_entry.runtime_data.coordinator.catching_up
+
+    # The next refresh reads a short page: its press is replayed, and the
+    # catch-up ends there.
+    mock_client.async_get_events.side_effect = [
+        EventPage(
+            (_press("00000000-0000-4000-8000-0000000000d2", OUTSIDE_ID),),
+            "AAAAAAAAAAtestcursor00000016",
+        ),
+    ]
+    await _refresh(hass, freezer)
+    assert hass.states.get(PRESS_ENTITY).attributes["replayed"] is True
+    assert not mock_config_entry.runtime_data.coordinator.catching_up
+
+
+def _old_press(event_id: str) -> Event:
+    """Return a press of the Outside button that happened an hour ago."""
+    data = load_json_fixture("events/press_created.json")
+    data["id"] = event_id
+    data["payload"]["press"]["occurred_at"] = (
+        dt_util.utcnow() - timedelta(hours=1)
+    ).isoformat()
+    return Event.from_dict(data)
+
+
+async def test_press_read_at_startup_replayed(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """A feed press read at startup is replayed; catch-up ends at the feed end."""
+    mock_client.async_get_events.side_effect = [
+        EventPage((_event("press_created"),), "AAAAAAAAAAtestcursor00000014")
+    ]
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get(PRESS_ENTITY).attributes["replayed"] is True
+    assert not mock_config_entry.runtime_data.coordinator.catching_up
+
+
+async def test_press_read_in_catch_up_after_failures_replayed(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """After failed refreshes, feed presses are replayed until the feed end."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
+    await _refresh(hass, freezer)
+    await _refresh(hass, freezer)
+    assert coordinator.catching_up
+
+    mock_client.async_get_bases.side_effect = None
+    mock_client.async_get_events.side_effect = [
+        EventPage((_press("00000000-0000-4000-8000-0000000000c1", OUTSIDE_ID),), "c1"),
+        EventPage((_press("00000000-0000-4000-8000-0000000000c2", OUTSIDE_ID),), "c2"),
+    ]
+    await _refresh(hass, freezer)
+    assert hass.states.get(PRESS_ENTITY).attributes["replayed"] is True
+    assert not coordinator.catching_up
+    await _refresh(hass, freezer)
+    assert hass.states.get(PRESS_ENTITY).attributes["replayed"] is False
+
+
+async def test_missed_press_in_polling_mode_live(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A press an hour old read by a polling refresh is live, not replayed."""
+    await setup_integration(hass, mock_config_entry)
+    mock_client.async_get_events.side_effect = [
+        EventPage((_old_press("00000000-0000-4000-8000-0000000000c3"),), "c1")
+    ]
+    await _refresh(hass, freezer)
+    state = hass.states.get(PRESS_ENTITY)
+    assert state.state != STATE_UNKNOWN
+    assert state.attributes["replayed"] is False

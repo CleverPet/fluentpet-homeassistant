@@ -48,27 +48,32 @@ async def test_press_without_pusher(
         signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),
         event.id,
         event.data,
+        False,
     )
     state = hass.states.get("event.outside_press")
     assert state.attributes["pressed_by"] is None
     assert state.attributes["interaction_id"] is None
 
 
-async def test_replayed_attribute(
+async def test_replayed_attribute_follows_flag(
     hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
 ) -> None:
-    """A press fired more than 2 minutes after it happened is marked replayed."""
+    """The replayed attribute is the flag passed with the press, whatever its age.
+
+    A recent press passed as replayed is replayed; an old one passed as live is
+    not.
+    """
     await setup_integration(hass, mock_config_entry)
     signal = signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa")
     for age, replayed in (
-        (timedelta(seconds=5), False),
-        (timedelta(minutes=2, seconds=1), True),
+        (timedelta(seconds=5), True),
+        (timedelta(hours=1), False),
     ):
         data = load_json_fixture("events/press_created.json")
         data["payload"]["press"]["occurred_at"] = (dt_util.utcnow() - age).isoformat()
         event = Event.from_dict(data)
         assert isinstance(event.data, PressCreatedData)
-        async_dispatcher_send(hass, signal, event.id, event.data)
+        async_dispatcher_send(hass, signal, event.id, event.data, replayed)
         state = hass.states.get("event.outside_press")
         assert state.attributes["replayed"] is replayed
 
@@ -91,6 +96,7 @@ async def test_press_by_teacher(
         signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),
         event.id,
         event.data,
+        False,
     )
     state = hass.states.get("event.outside_press")
     assert state.attributes["pressed_by"] == {"name": "Test Teacher", "type": "teacher"}

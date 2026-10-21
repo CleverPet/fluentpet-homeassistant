@@ -23,6 +23,8 @@ from custom_components.fluentpet.const import (
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
     DOMAIN,
+    SAFETY_POLL_INTERVAL,
+    SLOW_RETRY_MIN,
 )
 from custom_components.fluentpet.coordinator import not_admin_issue_id
 from custom_components.fluentpet.fluentpet_api import (
@@ -100,7 +102,7 @@ def _body(name: str, **overrides: Any) -> bytes:
 
 async def _refresh(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
     """Move time past the refresh interval."""
-    freezer.tick(timedelta(seconds=31))
+    freezer.tick(timedelta(seconds=61))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 
@@ -197,15 +199,17 @@ async def test_existing_webhook_unchanged(
     registered_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A matching webhook is left alone; the feed is still read every refresh."""
+    """A matching webhook is left alone; the safety poll still reads the feed."""
     await setup_integration(hass, registered_entry)
     mock_client.async_get_webhook.assert_awaited_once_with(HOUSEHOLD_ID, ENDPOINT_ID)
     mock_client.async_create_webhook.assert_not_awaited()
     mock_client.async_update_webhook.assert_not_awaited()
     assert mock_client.async_get_events.await_count == 1
     await _refresh(hass, freezer)
+    assert mock_client.async_get_events.await_count == 1
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
     assert mock_client.async_get_events.await_count == 2
-    assert mock_client.async_get_webhook.await_count == 1
+    mock_client.async_update_webhook.assert_not_awaited()
 
 
 @pytest.mark.usefixtures("external_url")
@@ -282,7 +286,10 @@ async def test_auto_disabled_webhook(
         )
         is None
     )
+    # Enabled again: the safety poll replaces the refresh interval.
     await _refresh(hass, freezer)
+    assert mock_client.async_get_events.await_count == 3
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
     assert mock_client.async_get_events.await_count == 4
 
 
@@ -555,7 +562,8 @@ async def test_press_delivery(
     assert state.attributes["press_order"] == 0
     assert state.attributes["occurred_at"] == "2026-10-17T11:59:58.412000+00:00"
     assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
-    assert state.attributes["replayed"] is True
+    # Delivered by the webhook: live, although it happened minutes ago.
+    assert state.attributes["replayed"] is False
     assert registered_entry.runtime_data.webhook.last_delivery is not None
 
 
@@ -621,6 +629,40 @@ async def test_lifecycle_delivery_refreshes(
 
 
 @pytest.mark.usefixtures("external_url")
+async def test_lifecycle_delivery_in_push_mode_refreshes_once(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A pushed base.updated reads the resources; its feed copy reads nothing."""
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    coordinator = registered_entry.runtime_data.coordinator
+    assert coordinator.push_active
+    assert mock_client.async_get_bases.await_count == 2
+
+    body = _body("base_updated")
+    headers = signed_headers(body, event_type="base.updated")
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert mock_client.async_get_bases.await_count == 3
+    assert mock_client.async_get_buttons.await_count == 3
+    assert mock_client.async_get_learners.await_count == 3
+
+    mock_client.async_get_events.side_effect = [
+        EventPage((Event.from_dict(json.loads(body)),), "AAAAAAAAAAtestcursor00000014")
+    ]
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    # Setup, the first safety poll, the refresh after the delivery, this poll,
+    # which reads the Bases but not the buttons again.
+    assert mock_client.async_get_events.await_count == 4
+    assert mock_client.async_get_bases.await_count == 4
+    assert mock_client.async_get_buttons.await_count == 3
+
+
+@pytest.mark.usefixtures("external_url")
 async def test_ping_delivery(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,
@@ -666,6 +708,12 @@ async def test_press_without_button_ignored(
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
 
 
+def _assert_not_delivered(entry: MockConfigEntry, failure_count: int) -> None:
+    """Assert a refused request left the delivery time and the mode alone."""
+    assert entry.runtime_data.webhook.last_delivery is None
+    assert entry.runtime_data.coordinator.push_active is (failure_count == 0)
+
+
 @pytest.mark.usefixtures("external_url")
 @pytest.mark.parametrize(
     "headers",
@@ -677,6 +725,7 @@ async def test_press_without_button_ignored(
         ),
     ],
 )
+@pytest.mark.parametrize("failure_count", [0, 3])
 async def test_unsigned_delivery_rejected(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,
@@ -684,45 +733,60 @@ async def test_unsigned_delivery_rejected(
     registered_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
     headers: dict[str, str],
+    failure_count: int,
 ) -> None:
-    """Missing or wrong signatures are refused without logging the body."""
+    """Missing or wrong signatures are refused without logging the body.
+
+    A refused request does not count as a delivery for the health rule.
+    """
+    mock_client.async_get_webhook.return_value = webhook(failure_count=failure_count)
     await setup_integration(hass, registered_entry)
     body = _body("press_created")
     assert await _post(hass_client_no_auth, body, headers) == 401
     await hass.async_block_till_done()
+    _assert_not_delivered(registered_entry, failure_count)
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
     assert "Rejected a FluentPet webhook request" in caplog.text
     assert "btn_testbuttonoutside" not in caplog.text
 
 
 @pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize("failure_count", [0, 3])
 async def test_wrong_secret_rejected(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,
     mock_client: AsyncMock,
     registered_entry: MockConfigEntry,
+    failure_count: int,
 ) -> None:
-    """A body signed with another secret is refused."""
+    """A body signed with another secret is refused and is no delivery."""
+    mock_client.async_get_webhook.return_value = webhook(failure_count=failure_count)
     await setup_integration(hass, registered_entry)
     body = _body("press_created")
     headers = signed_headers(body, secret="whsec_" + "1" * 64)
     assert await _post(hass_client_no_auth, body, headers) == 401
+    await hass.async_block_till_done()
+    _assert_not_delivered(registered_entry, failure_count)
 
 
 @pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize("failure_count", [0, 3])
 async def test_stale_delivery_rejected(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,
     mock_client: AsyncMock,
     registered_entry: MockConfigEntry,
+    failure_count: int,
 ) -> None:
-    """A correctly signed but old delivery is refused."""
+    """A correctly signed but old delivery is refused and is no delivery."""
+    mock_client.async_get_webhook.return_value = webhook(failure_count=failure_count)
     await setup_integration(hass, registered_entry)
     body = _body("press_created")
     headers = signed_headers(body, timestamp=int(time.time()) - 600)
     assert await _post(hass_client_no_auth, body, headers) == 401
     await hass.async_block_till_done()
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    _assert_not_delivered(registered_entry, failure_count)
 
 
 @pytest.mark.usefixtures("external_url")
@@ -1126,7 +1190,7 @@ async def test_late_delivery_not_processed(
     mock_client.async_get_events.side_effect = [
         EventPage((Event.from_dict(json.loads(body)),), "AAAAAAAAAAtestcursor00000014")
     ]
-    await _refresh(hass, freezer)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
     assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
 
 
@@ -1196,7 +1260,8 @@ async def test_push_during_failed_refresh_fires(
     await setup_integration(hass, registered_entry)
     coordinator = registered_entry.runtime_data.coordinator
     mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
-    await _refresh(hass, freezer)
+    # The first safety poll after the webhook became healthy reads the resources.
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
     assert not coordinator.last_update_success
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
     assert hass.states.get(SENSOR_ENTITY).state == STATE_UNKNOWN
@@ -1495,3 +1560,106 @@ async def test_held_press_not_fired_twice_after_eviction(
     ]
     assert len(fired) == 1
     assert not processor.held_events
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_verification_runs_slightly_early(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A check a little before the 5 minutes are up (timer rounding) verifies."""
+    await setup_integration(hass, registered_entry)
+    manager = registered_entry.runtime_data.webhook
+    assert mock_client.async_get_webhook.await_count == 1
+    freezer.tick(SLOW_RETRY_MIN - timedelta(milliseconds=300))
+    await manager.async_check()
+    assert mock_client.async_get_webhook.await_count == 2
+    await manager.async_check()
+    assert mock_client.async_get_webhook.await_count == 2
+
+
+@pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize("name", ["ping", "press_created"])
+async def test_delivery_while_failing_switches_to_push(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    name: str,
+) -> None:
+    """A verified delivery, a ping too, makes a failing webhook healthy.
+
+    FluentPet keeps counting failures until a delivery other than a ping
+    succeeds; a delivery that reached Home Assistant outweighs the count. The
+    first safety poll after the switch reads everything once.
+    """
+    mock_client.async_get_webhook.return_value = webhook(failure_count=3)
+    await setup_integration(hass, registered_entry)
+    coordinator = registered_entry.runtime_data.coordinator
+    assert not coordinator.push_active
+    assert coordinator.update_interval == timedelta(seconds=60)
+
+    body = _body(name)
+    headers = signed_headers(body, event_type=name.replace("_", "."))
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert coordinator.push_active
+    assert coordinator.update_interval == SAFETY_POLL_INTERVAL
+
+    mock_client.reset_mock(return_value=False, side_effect=False)
+    await _refresh(hass, freezer)
+    assert mock_client.async_get_events.await_count == 0
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL - timedelta(seconds=61))
+    assert mock_client.async_get_buttons.await_count == 1
+    assert coordinator.push_active
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_delivery_window_expiry_falls_back_to_polling(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Without deliveries for 10 minutes, a failing webhook polls again."""
+    mock_client.async_get_webhook.return_value = webhook(failure_count=3)
+    await setup_integration(hass, registered_entry)
+    coordinator = registered_entry.runtime_data.coordinator
+    body = _body("ping")
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    assert coordinator.push_active
+
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert coordinator.push_active
+    mock_client.reset_mock(return_value=False, side_effect=False)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL + timedelta(seconds=1))
+    # The refresh that finds the window expired already polls everything.
+    assert not coordinator.push_active
+    assert mock_client.async_get_buttons.await_count == 1
+    assert coordinator.update_interval == timedelta(seconds=60)
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_pushed_press_moves_last_seen(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+) -> None:
+    """A pushed press moves the last seen time of its Base, without a request."""
+    await setup_integration(hass, registered_entry)
+    mock_client.reset_mock(return_value=False, side_effect=False)
+    body = _body("press_created")
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    created_at = dt_util.parse_datetime(json.loads(body)["created_at"])
+    assert created_at is not None
+    assert dt_util.parse_datetime(
+        hass.states.get("sensor.test_base_last_seen").state
+    ) == created_at.replace(microsecond=0)
+    assert mock_client.mock_calls == []

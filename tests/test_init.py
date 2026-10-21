@@ -18,6 +18,8 @@ from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 from custom_components.fluentpet.api import StaticTokenAuth
 from custom_components.fluentpet.const import (
     CONF_CLOUDHOOK,
+    CONF_PREFER_CLOUDHOOK,
+    CONF_SCAN_INTERVAL,
     CONF_WEBHOOK_ENDPOINT_ID,
     CONF_WEBHOOK_SECRET,
     CONF_WEBHOOK_URL,
@@ -426,7 +428,7 @@ async def test_token_refresh_error_at_runtime(
     aioclient_mock.post(OAUTH2_TOKEN, status=status, json={"error": "invalid_grant"})
     calls = aioclient_mock.call_count
     for _ in range(2):
-        freezer.tick(timedelta(seconds=31))
+        freezer.tick(timedelta(seconds=61))
         async_fire_time_changed(hass)
         await hass.async_block_till_done()
     assert not coordinator.last_update_success
@@ -478,3 +480,42 @@ async def test_remove_entry_with_expired_token(
         auth.assert_not_called()
     notifications = async_get_persistent_notifications(hass)
     assert (f"{NOTIFICATION_ID}{entry.entry_id}" in notifications) is not deleted
+
+
+@pytest.mark.parametrize(
+    ("options", "migrated"),
+    [
+        ({CONF_SCAN_INTERVAL: 10, CONF_PREFER_CLOUDHOOK: False}, 30),
+        ({CONF_SCAN_INTERVAL: 29}, 30),
+        ({CONF_SCAN_INTERVAL: 30}, 30),
+        ({CONF_SCAN_INTERVAL: 45}, 45),
+        ({}, None),
+    ],
+)
+async def test_migrate_raises_refresh_interval(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    entry_data: dict[str, Any],
+    options: dict[str, Any],
+    migrated: int | None,
+) -> None:
+    """Entries of version 1.1 get a refresh interval of at least 30 seconds."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        unique_id=HOUSEHOLD_ID,
+        data=entry_data,
+        options=options,
+        version=1,
+        minor_version=1,
+    )
+    await setup_integration(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.version == 1
+    assert entry.minor_version == 2
+    assert entry.options.get(CONF_SCAN_INTERVAL) == migrated
+    assert {
+        key: value for key, value in entry.options.items() if key != CONF_SCAN_INTERVAL
+    } == {key: value for key, value in options.items() if key != CONF_SCAN_INTERVAL}
+    coordinator = entry.runtime_data.coordinator
+    assert coordinator.update_interval == timedelta(seconds=migrated or 60)

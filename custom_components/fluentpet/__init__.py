@@ -32,10 +32,12 @@ from .const import (
     CLIENT_ID,
     CLIENT_NAME,
     CONF_HOUSEHOLD_ID,
+    CONF_SCAN_INTERVAL,
     CONF_WEBHOOK_ENDPOINT_ID,
     CONF_WEBHOOK_ID,
     DOMAIN,
     LOGGER,
+    MIN_SCAN_INTERVAL,
     MY_FLUENTPET_URL,
     STORAGE_VERSION,
 )
@@ -100,6 +102,27 @@ async def _async_create_removal_client(
             api_base_url(entry.options),
         )
     )
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: FluentPetConfigEntry) -> bool:
+    """Migrate an entry to the current version.
+
+    Home Assistant does not load an entry of a newer major version.
+    """
+    if entry.minor_version < 2:
+        # 1.2 raised the minimum refresh interval; raise a lower stored value.
+        options = dict(entry.options)
+        interval = options.get(CONF_SCAN_INTERVAL)
+        if isinstance(interval, int | float) and interval < MIN_SCAN_INTERVAL:
+            LOGGER.info(
+                "Raising the refresh interval of %s from %s to %s seconds",
+                entry.title,
+                interval,
+                MIN_SCAN_INTERVAL,
+            )
+            options[CONF_SCAN_INTERVAL] = MIN_SCAN_INTERVAL
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: FluentPetConfigEntry) -> bool:

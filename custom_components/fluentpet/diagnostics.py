@@ -47,11 +47,15 @@ async def async_get_config_entry_diagnostics(
         "data": async_redact_data(asdict(coordinator.data), TO_REDACT),
         "webhook": {
             "active": manager.active,
+            "healthy": manager.healthy,
+            "failing": manager.failing,
+            "failure_count": manager.failure_count,
             "auto_disabled": manager.auto_disabled,
             "uses_cloudhook": manager.uses_cloudhook,
             "last_delivery": manager.last_delivery,
         },
         "feed": {
+            "push_active": coordinator.push_active,
             "has_cursor": coordinator.cursor is not None,
             "update_interval": coordinator.update_interval.total_seconds()
             if coordinator.update_interval

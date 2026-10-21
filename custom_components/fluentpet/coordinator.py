@@ -1,8 +1,8 @@
 """Coordinator of the FluentPet Connect integration."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, override
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,11 +29,13 @@ from .const import (
     LOGGER,
     MANUFACTURER,
     MAX_BACKOFF,
+    SAFETY_POLL_INTERVAL,
     STORAGE_VERSION,
     STORE_SAVE_DELAY,
 )
 from .events import FluentPetEventProcessor
 from .fluentpet_api import (
+    LIFECYCLE_EVENT_TYPES,
     Base,
     Button,
     Event,
@@ -45,7 +47,9 @@ from .fluentpet_api import (
     FluentPetRateLimitError,
     FluentPetRequestError,
     FluentPetServerError,
+    InteractionUpdatedData,
     Learner,
+    PressCreatedData,
 )
 from .retry import SlowRetry
 
@@ -60,6 +64,23 @@ class FluentPetHouseholdData:
     bases: dict[str, Base]
     buttons: dict[str, Button]
     learners: dict[str, Learner]
+
+
+@dataclass(frozen=True, slots=True)
+class _ResourceRead:
+    """The resources read by a refresh, committed when the refresh succeeds.
+
+    Attributes:
+        bases_complete: No Base was skipped as malformed.
+        buttons_complete: No button was skipped, in this read or, when the
+            buttons were not read, in the read they come from.
+        buttons_read: The buttons were read by this refresh.
+    """
+
+    data: FluentPetHouseholdData
+    bases_complete: bool
+    buttons_complete: bool
+    buttons_read: bool
 
 
 @dataclass(slots=True)
@@ -85,13 +106,30 @@ def base_device_name(base: Base) -> str:
 
 
 class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
-    """Refreshes household resources and reads the event feed every interval.
+    """Refreshes household resources and reads the event feed.
 
-    The feed is read on every refresh, also while the webhook is active, so the
-    stored cursor stays current and events missed by the webhook (for example while
-    Home Assistant was down) are caught up. The webhook gives low latency; the ids of
-    recently processed events are stored with the cursor, so an event delivered by
-    both, or read again after a restart, fires once.
+    Without a healthy webhook (see webhook_healthy), every refresh reads the feed,
+    then the Bases, buttons and learners, with the refresh interval. While the
+    webhook is healthy, a safety poll every SAFETY_POLL_INTERVAL reads the feed
+    and the Bases (for their last seen time); the buttons and learners are read
+    too after a lifecycle event (base, button or pusher), after a feed press of
+    an unknown button, once when the webhook becomes healthy, after a failed
+    refresh, when the feed had to restart at its newest event, and on request.
+    Pushed presses and interactions move the last seen time of their Base
+    forward in between.
+
+    The feed is read on every refresh, so the stored cursor stays current and
+    events missed by the webhook (for example while Home Assistant was down) are
+    caught up. The ids of recently processed events are stored with the cursor,
+    so an event delivered by both, or read again after a restart, fires once.
+
+    catching_up is True from setup (or reload) until a refresh first reads the
+    feed to its end (a page shorter than FEED_PAGE_LIMIT), and again after a
+    failed refresh or while the feed is not readable (403), until the next
+    refresh that reads it to its end. Presses read from the feed
+    while catching up are marked replayed; presses the webhook delivers, and
+    feed presses read at other times (a safety poll or polling refresh picking
+    up a missed delivery), are live.
     """
 
     config_entry: FluentPetConfigEntry
@@ -126,6 +164,19 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         self._store_loaded = False
         self._feed_forbidden = False
         self._feed_retry = SlowRetry()
+        # Whether the next refresh reads the resources also while push is active,
+        # and whether the running refresh reads them.
+        self._full_refresh = True
+        self._refresh_is_full = False
+        self._backing_off = False
+        # Whether the buttons last committed were complete.
+        self._buttons_complete = True
+        # Last seen times pushed events set, per Base id, until a Bases read
+        # catches up (see _async_apply_pushed_seen).
+        self._pushed_seen: dict[str, datetime] = {}
+        # See catching_up; whether the running refresh read the feed to its end.
+        self.catching_up = True
+        self._feed_at_tail = False
         # Events and the position read by the running refresh, applied when it
         # succeeds (see _async_refresh_finished).
         self._feed_batch: list[Event] = []
@@ -133,7 +184,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         # The resources of the running refresh and whether the lists were
         # complete; committed to the known ids and the device registry only when
         # the refresh succeeds.
-        self._resources: tuple[FluentPetHouseholdData, bool] | None = None
+        self._resources: _ResourceRead | None = None
 
     @override
     async def _async_setup(self) -> None:
@@ -240,51 +291,85 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         if self._store_loaded:
             await self.store.async_save(self._store_data())
 
+    @property
+    def push_active(self) -> bool:
+        """Return whether push is active, because the webhook is healthy."""
+        return self.webhook is not None and self.webhook.healthy
+
+    @property
+    def _mode_interval(self) -> timedelta:
+        """Return the refresh interval of the current mode, without backoff."""
+        return SAFETY_POLL_INTERVAL if self.push_active else self._base_interval
+
+    @override
+    async def async_request_refresh(self) -> None:
+        """Request a refresh that also reads the buttons and learners.
+
+        Requested after a pushed lifecycle event or a press of an unknown button,
+        or by the user (homeassistant.update_entity), so everything is read also
+        while push is active. A request during the debounce cooldown keeps the
+        flag until the refresh runs.
+        """
+        self._full_refresh = True
+        await super().async_request_refresh()
+
+    @callback
+    def async_webhook_health_changed(self) -> None:
+        """Switch between the safety poll and the refresh interval.
+
+        Called by the webhook manager. When the webhook becomes healthy, the next
+        refresh still reads the resources once. A running backoff is kept.
+        """
+        if self.push_active:
+            LOGGER.debug("Webhook healthy; switching to the safety poll")
+            # A running full refresh covers it: its feed read follows the check.
+            if not self._refresh_is_full:
+                self._full_refresh = True
+        else:
+            LOGGER.debug("Webhook unavailable; refreshing with the refresh interval")
+        self._async_apply_interval()
+        # DataUpdateCoordinator clears _unsub_refresh while a refresh runs and
+        # schedules the next one when it finishes; _schedule_refresh cancels the
+        # pending timer. So only a waiting coordinator is rescheduled here.
+        if self._unsub_refresh is not None:
+            self._schedule_refresh()
+
+    @callback
+    def _async_apply_interval(self) -> None:
+        """Set the interval of the current mode, or keep a longer backoff."""
+        interval = self._mode_interval
+        if self._backing_off and self.update_interval is not None:
+            interval = max(interval, self.update_interval)
+        self.update_interval = interval
+
     @override
     async def _async_update_data(self) -> FluentPetHouseholdData:
-        """Fetch the household resources and new feed events."""
-        self.refresh_count += 1
+        """Fetch new feed events, then the household resources."""
         self._feed_batch = []
         self._feed_cursor = self.cursor
+        self._feed_at_tail = False
         self._resources = None
-        skipped: list[str] = []
-
-        def _skip(kind: str) -> Callable[[FluentPetParseError], None]:
-            def _on_invalid(err: FluentPetParseError) -> None:
-                LOGGER.warning("Skipped a malformed FluentPet %s: %s", kind, err)
-                skipped.append(kind)
-
-            return _on_invalid
-
-        household_id = self.household_id
+        if self.webhook is not None:
+            # A delivery window may have expired since the last evaluation.
+            self.webhook.async_update_health()
+        self._refresh_is_full = self._full_refresh or not self.push_active
+        self._full_refresh = False
         try:
-            data = FluentPetHouseholdData(
-                bases={
-                    base.id: base
-                    for base in await self.client.async_get_bases(
-                        household_id, on_invalid=_skip("Base")
-                    )
-                },
-                buttons={
-                    button.id: button
-                    for button in await self.client.async_get_buttons(
-                        household_id, on_invalid=_skip("button")
-                    )
-                },
-                learners={
-                    learner.id: learner
-                    for learner in await self.client.async_get_learners(
-                        household_id, on_invalid=_skip("learner")
-                    )
-                },
-            )
-            # Applied in _async_refresh_finished once the whole refresh succeeded:
-            # a refresh that fails later (the feed, the webhook check) keeps the
-            # previous data, so its known ids and devices must stay as well.
-            self._resources = (data, not skipped)
+            # The check and the feed come first, so the resources read after
+            # them are at least as new as every event of the batch.
             if self.webhook is not None:
                 await self.webhook.async_check()
-            await self._async_poll_feed()
+            reset = await self._async_poll_feed()
+            if self._refresh_is_full or reset or self._feed_needs_resources():
+                # Also in a safety poll whose feed restarted at its newest event
+                # (which may skip lifecycle events), or has a lifecycle event the
+                # webhook did not deliver or a press of an unknown button: once,
+                # however many events.
+                resources = await self._async_fetch_resources()
+            else:
+                # The safety poll: the Bases, for their last seen time. Buttons
+                # and learners follow their events.
+                resources = await self._async_fetch_bases()
         except (FluentPetAuthError, OAuth2TokenRequestReauthError) as err:
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN, translation_key="authentication_failed"
@@ -305,14 +390,165 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 translation_key="update_error",
                 translation_placeholders={"error": str(err)},
             ) from err
-        self.update_interval = self._base_interval
-        return data
+        self._backing_off = False
+        self._async_apply_interval()
+        # No await from here: pushed last seen times that arrived during the
+        # reads are applied to the data this refresh returns and commits.
+        # Committed in _async_refresh_finished once the refresh succeeded; a
+        # failed refresh keeps the previous data, known ids and devices.
+        self._resources = self._async_apply_pushed_seen(resources)
+        return self._resources.data
+
+    @callback
+    def _feed_needs_resources(self) -> bool:
+        """Return whether the feed read needs the buttons and learners read.
+
+        True for a lifecycle event not processed yet, and for a new press of a
+        button Home Assistant does not know.
+        """
+        processor = self.processor
+        for event in self._feed_batch:
+            if event.id in processor.seen_events or event.id in processor.held_events:
+                continue
+            if event.type in LIFECYCLE_EVENT_TYPES:
+                return True
+            data = event.data
+            if (
+                isinstance(data, PressCreatedData)
+                and data.button is not None
+                and data.button.id not in self.known_button_ids
+            ):
+                return True
+        return False
+
+    @callback
+    def _async_apply_pushed_seen(self, resources: _ResourceRead) -> _ResourceRead:
+        """Apply the last seen times pushed events set to the Bases read.
+
+        A pushed time is kept while it is newer than the time FluentPet returns,
+        also when FluentPet returns none, and forgotten once FluentPet catches up
+        or the Base is gone.
+        """
+        pushed = self._pushed_seen
+        if not pushed:
+            return resources
+        bases = dict(resources.data.bases)
+        for base_id, seen in list(pushed.items()):
+            if (base := bases.get(base_id)) is None:
+                if resources.bases_complete:
+                    del pushed[base_id]
+                continue
+            if base.last_online_at is not None and base.last_online_at >= seen:
+                del pushed[base_id]
+                continue
+            bases[base_id] = replace(base, last_online_at=seen)
+        return replace(resources, data=replace(resources.data, bases=bases))
+
+    async def _async_fetch_resources(self) -> _ResourceRead:
+        """Fetch the Bases, buttons and learners of the household."""
+        # Counts button reads, so presses of unknown buttons wait for one that
+        # started after they arrived (see async_drop_stale_pending).
+        self.refresh_count += 1
+        skipped: list[str] = []
+
+        def _skip(kind: str) -> Callable[[FluentPetParseError], None]:
+            def _on_invalid(err: FluentPetParseError) -> None:
+                LOGGER.warning("Skipped a malformed FluentPet %s: %s", kind, err)
+                skipped.append(kind)
+
+            return _on_invalid
+
+        household_id = self.household_id
+        data = FluentPetHouseholdData(
+            bases={
+                base.id: base
+                for base in await self.client.async_get_bases(
+                    household_id, on_invalid=_skip("Base")
+                )
+            },
+            buttons={
+                button.id: button
+                for button in await self.client.async_get_buttons(
+                    household_id, on_invalid=_skip("button")
+                )
+            },
+            learners={
+                learner.id: learner
+                for learner in await self.client.async_get_learners(
+                    household_id, on_invalid=_skip("learner")
+                )
+            },
+        )
+        return _ResourceRead(
+            data,
+            bases_complete=not skipped,
+            buttons_complete=not skipped,
+            buttons_read=True,
+        )
+
+    async def _async_fetch_bases(self) -> _ResourceRead:
+        """Fetch the Bases; keep the buttons and learners of the last refresh."""
+        skipped = False
+
+        def _on_invalid(err: FluentPetParseError) -> None:
+            nonlocal skipped
+            LOGGER.warning("Skipped a malformed FluentPet Base: %s", err)
+            skipped = True
+
+        bases = {
+            base.id: base
+            for base in await self.client.async_get_bases(
+                self.household_id, on_invalid=_on_invalid
+            )
+        }
+        # The buttons and learners as committed now, after the await.
+        return _ResourceRead(
+            replace(self.data, bases=bases),
+            bases_complete=not skipped,
+            buttons_complete=self._buttons_complete,
+            buttons_read=False,
+        )
+
+    @callback
+    def async_base_seen(self, event: Event) -> None:
+        """Move the last seen time of the Base of a pushed event forward.
+
+        A press or interaction delivered by the webhook shows that its Base was
+        online when FluentPet stored the event. No request is made; the time
+        only moves forward.
+        """
+        data = event.data
+        if (
+            not isinstance(data, PressCreatedData | InteractionUpdatedData)
+            or data.base is None
+            or (base := self.data.bases.get(data.base.id)) is None
+            or (
+                base.last_online_at is not None
+                and base.last_online_at >= event.created_at
+            )
+            or (
+                (pushed := self._pushed_seen.get(base.id)) is not None
+                and pushed >= event.created_at
+            )
+        ):
+            return
+        # Kept for the refresh that may be reading the Bases right now.
+        self._pushed_seen[base.id] = event.created_at
+        bases = {
+            **self.data.bases,
+            base.id: replace(base, last_online_at=event.created_at),
+        }
+        # Not async_set_updated_data, which would also move the next safety poll.
+        self.data = replace(self.data, bases=bases)
+        self.async_update_listeners()
 
     @callback
     def _async_back_off(self) -> None:
         """Double the refresh interval, up to MAX_BACKOFF."""
-        current = self.update_interval or self._base_interval
-        self.update_interval = max(self._base_interval, min(current * 2, MAX_BACKOFF))
+        mode_interval = self._mode_interval
+        current = self.update_interval or mode_interval
+        self._backing_off = True
+        self.update_interval = max(mode_interval, min(current * 2, MAX_BACKOFF))
 
     @callback
     def _async_feed_forbidden(self) -> None:
@@ -327,6 +563,9 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 self.config_entry.title,
             )
         self._feed_forbidden = True
+        # The only feed failure a refresh survives; the backlog read once the
+        # feed is readable again is a catch-up.
+        self.catching_up = True
         self._feed_retry.schedule(dt_util.utcnow())
         self.async_update_not_admin_issue()
 
@@ -367,8 +606,11 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         """Log an event of the feed that is skipped because it is malformed."""
         LOGGER.warning("Skipped a malformed FluentPet event: %s", err)
 
-    async def _async_poll_feed(self) -> None:
+    async def _async_poll_feed(self) -> bool:
         """Read the feed from the cursor, page by page.
+
+        Returns whether the position was reset to the newest event, so events
+        since the last read may be missed.
 
         The events and the new position are kept in _feed_batch and _feed_cursor
         and applied only when the whole refresh succeeds, so entities are
@@ -376,15 +618,16 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         the position past events it did not apply.
         """
         if self._feed_forbidden and not self._feed_retry.due(dt_util.utcnow()):
-            return
+            return False
+        reset = recovered = False
         if not self._store_loaded:
             # The tail of the feed was not readable at setup.
             try:
                 await self._async_start_at_tail()
             except FluentPetForbiddenError:
                 self._async_feed_forbidden()
-                return
-        recovered = False
+                return False
+            reset = True
         cursor = self._feed_cursor = self.cursor
         for _ in range(FEED_MAX_PAGES):
             try:
@@ -396,7 +639,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 )
             except FluentPetForbiddenError:
                 self._async_feed_forbidden()
-                return
+                return reset
             except FluentPetRequestError:
                 # FluentPet answers 400 for a position it did not issue for this
                 # household (a corrupted store, another environment). Start over at
@@ -409,7 +652,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                     " may be missed",
                     self.config_entry.title,
                 )
-                recovered = True
+                reset = recovered = True
                 cursor = self._feed_cursor = await self.client.async_get_tail_cursor(
                     self.household_id
                 )
@@ -419,7 +662,9 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             if page.next_cursor is not None:
                 cursor = self._feed_cursor = page.next_cursor
             if len(page.events) < FEED_PAGE_LIMIT:
-                return
+                self._feed_at_tail = True
+                return reset
+        return reset
 
     @override
     @callback
@@ -432,40 +677,57 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         """
         batch, self._feed_batch = self._feed_batch, []
         resources, self._resources = self._resources, None
-        if self.last_update_success:
-            if resources is not None:
-                self._async_commit_resources(*resources)
-            if batch:
-                # Write the available state first, so a state trigger that
-                # excludes changes from unavailable sees the presses.
-                self.async_update_listeners()
-            for event in batch:
-                self.processor.async_process(event)
-            if self._feed_cursor != self.cursor:
-                self.cursor = self._feed_cursor
-                self.config_entry.async_create_task(
-                    self.hass,
-                    self.store.async_save(self._store_data()),
-                    "fluentpet store feed position",
-                )
-        self.processor.async_drop_stale_pending()
+        self._refresh_is_full = False
+        if not self.last_update_success:
+            # Read everything on the next refresh, also what a failed safety
+            # poll would have read after a feed restart.
+            self._full_refresh = True
+            self.catching_up = True
+            return
+        if resources is not None:
+            self._async_commit_resources(resources)
+        if batch:
+            # Write the available state first, so a state trigger that
+            # excludes changes from unavailable sees the presses.
+            self.async_update_listeners()
+        for event in batch:
+            # This refresh read the resources after the feed, and all of them
+            # after a lifecycle event (see _async_update_data), so the event
+            # requests no other refresh.
+            self.processor.async_process(
+                event, refresh=False, replayed=self.catching_up
+            )
+        if self._feed_at_tail:
+            self.catching_up = False
+        if self._feed_cursor != self.cursor:
+            self.cursor = self._feed_cursor
+            self.config_entry.async_create_task(
+                self.hass,
+                self.store.async_save(self._store_data()),
+                "fluentpet store feed position",
+            )
+        if resources is not None and resources.buttons_read:
+            self.processor.async_drop_stale_pending()
 
     @callback
-    def _async_commit_resources(
-        self, data: FluentPetHouseholdData, complete: bool
-    ) -> None:
+    def _async_commit_resources(self, resources: _ResourceRead) -> None:
         """Record the ids the household has and update the devices.
 
         With a skipped malformed item the lists are incomplete: the known ids are
         kept and no device is removed because of one malformed item.
         """
+        data = resources.data
         self.known_button_ids = set(data.buttons) | (
-            set() if complete else self.known_button_ids
+            set() if resources.buttons_complete else self.known_button_ids
         )
         self.known_base_ids = set(data.bases) | (
-            set() if complete else self.known_base_ids
+            set() if resources.bases_complete else self.known_base_ids
         )
-        self._async_update_devices(data, remove_stale=complete)
+        self._buttons_complete = resources.buttons_complete
+        self._async_update_devices(
+            data,
+            remove_stale=resources.bases_complete and resources.buttons_complete,
+        )
 
     @callback
     def _async_update_devices(

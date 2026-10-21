@@ -5,7 +5,7 @@ rules:
     comment: The integration does not register service actions.
   appropriate-polling:
     status: done
-    comment: Events are pushed by webhook; the event feed and the Bases (last seen, power mode, battery level) are read every 30 seconds by default (configurable 10 to 3600) so no event is missed, with backoff on rate limits and server errors and Retry-After honored.
+    comment: Push first. While the webhook is healthy, events are pushed and a safety poll reads the event feed and the Bases every 5 minutes; buttons and learners are read after their events. Without a healthy webhook, everything is polled at the refresh interval (30 to 3600 seconds, default 60). Backoff on rate limits and server errors, with Retry-After honored.
   brands:
     status: done
     comment: Brand folder from the official FluentPet symbol and the 2022 joined logo

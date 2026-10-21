@@ -34,6 +34,8 @@ from .const import (
     LOGGER,
     MY_FLUENTPET_URL,
     SLOW_RETRY_MIN,
+    VERIFY_SLACK,
+    WEBHOOK_DELIVERY_WINDOW,
     WEBHOOK_STALE_EVENT_AGE,
 )
 from .coordinator import FluentPetConfigEntry
@@ -71,6 +73,36 @@ def webhook_limit_issue_id(entry_id: str) -> str:
     return f"{ISSUE_WEBHOOK_LIMIT}_{entry_id}"
 
 
+def webhook_healthy(
+    *,
+    active: bool,
+    check_failed: bool,
+    failure_count: int,
+    last_delivery: datetime | None,
+    now: datetime,
+) -> bool:
+    """Return whether push can replace polling; the one place of this rule.
+
+    FluentPet counts consecutive failed delivery attempts in failure_count. It
+    resets the count only on a successful delivery of an event that is not a
+    ping, or when the webhook is enabled again, and disables the webhook (enabled
+    false) after 20 failures in a row. A count above 0 can therefore stay while
+    deliveries work, for example when only pings arrived since. A delivery that
+    passed the signature check here within WEBHOOK_DELIVERY_WINDOW proves that
+    FluentPet reaches Home Assistant, so it outweighs the count.
+
+    Healthy: the webhook is active (registered, enabled, not refused) and its
+    last check succeeded, and FluentPet reports no failure or a verified
+    delivery arrived within the window. Health only governs latency; the feed
+    read of the safety poll covers missed events.
+    """
+    if not active or check_failed:
+        return False
+    return failure_count == 0 or (
+        last_delivery is not None and now - last_delivery <= WEBHOOK_DELIVERY_WINDOW
+    )
+
+
 def _is_webhook_limit(err: FluentPetRequestError) -> bool:
     """Return whether FluentPet refused a new webhook because the household has the most."""
     return (
@@ -83,9 +115,10 @@ def _is_webhook_limit(err: FluentPetRequestError) -> bool:
 class FluentPetWebhookManager:
     """Keeps a FluentPet webhook pointed at this Home Assistant and receives it.
 
-    The coordinator reads the event feed every refresh in any case; the webhook only
-    lowers latency. Without an https URL, or when FluentPet refuses or disabled the
-    webhook, events arrive with the refresh interval.
+    While the webhook is healthy (see webhook_healthy), the coordinator reads the
+    event feed and the Bases every SAFETY_POLL_INTERVAL and the other resources
+    after their events. Otherwise it refreshes everything with the refresh
+    interval.
 
     What the next refresh would not fix (no usable URL, a refused webhook) is tried
     again on a slow schedule, from 5 minutes up to 1 hour, and when Home Assistant
@@ -109,6 +142,10 @@ class FluentPetWebhookManager:
         self._active = False
         self.auto_disabled = False
         self.forbidden = False
+        # The consecutive failed deliveries FluentPet reported at the last check.
+        self._failure_count = 0
+        # The health last evaluated, which the coordinator was told about.
+        self._healthy = False
         self.last_delivery: datetime | None = None
         self._needs_check = False
         self._refused = False
@@ -127,9 +164,63 @@ class FluentPetWebhookManager:
     @active.setter
     def active(self, active: bool) -> None:
         """Set whether the webhook delivers; entities follow it for availability."""
-        if active != self._active:
+        self._async_set_state(active=active)
+
+    @property
+    def failure_count(self) -> int:
+        """Return the consecutive failed deliveries FluentPet reported last."""
+        return self._failure_count
+
+    @property
+    def failing(self) -> bool:
+        """Return whether FluentPet reported failed deliveries at the last check."""
+        return self._failure_count > 0
+
+    @callback
+    def _async_set_state(
+        self,
+        *,
+        active: bool | None = None,
+        needs_check: bool | None = None,
+        failure_count: int | None = None,
+    ) -> None:
+        """Change the state that makes the webhook healthy, in one step.
+
+        Entities follow active for availability; then the health is evaluated.
+        """
+        if needs_check is not None:
+            self._needs_check = needs_check
+        if failure_count is not None:
+            self._failure_count = failure_count
+        if active is not None and active != self._active:
             self._active = active
             self.processor.coordinator.async_update_listeners()
+        self.async_update_health()
+
+    @callback
+    def async_update_health(self) -> None:
+        """Evaluate the health, and tell the coordinator once when it changed.
+
+        Also called at every refresh, since a delivery window can expire.
+        """
+        healthy = webhook_healthy(
+            active=self._active,
+            check_failed=self._needs_check,
+            failure_count=self._failure_count,
+            last_delivery=self.last_delivery,
+            now=dt_util.utcnow(),
+        )
+        if healthy != self._healthy:
+            self._healthy = healthy
+            self.processor.coordinator.async_webhook_health_changed()
+
+    @property
+    def healthy(self) -> bool:
+        """Return whether push can replace polling, as last evaluated.
+
+        See webhook_healthy.
+        """
+        return self._healthy
 
     @property
     def webhook_id(self) -> str:
@@ -186,13 +277,19 @@ class FluentPetWebhookManager:
 
         An active webhook is read again every SLOW_RETRY_MIN (at the next refresh
         while FluentPet reports failed deliveries), so one FluentPet disabled,
-        deleted or changed while Home Assistant runs is noticed.
+        deleted or changed while Home Assistant runs is noticed. A refresh up to
+        VERIFY_SLACK early still verifies, so timer rounding does not skip a
+        check and stretch it to twice the interval.
         """
         now = dt_util.utcnow()
         if (
             self._needs_check
             or self._retry.due(now)
-            or (self.active and self._verify_at is not None and now >= self._verify_at)
+            or (
+                self.active
+                and self._verify_at is not None
+                and now >= self._verify_at - VERIFY_SLACK
+            )
         ):
             await self.async_reconcile()
 
@@ -230,7 +327,7 @@ class FluentPetWebhookManager:
                     )
             except (FluentPetError, OAuth2TokenRequestBaseError) as err:
                 LOGGER.debug("Could not update the FluentPet webhook: %s", err)
-                self._needs_check = True
+                self._async_set_state(needs_check=True)
 
     @callback
     def _async_refused(self, err: FluentPetError) -> None:
@@ -242,8 +339,7 @@ class FluentPetWebhookManager:
                 err,
             )
         self._refused = True
-        self.active = False
-        self._needs_check = False
+        self._async_set_state(active=False, needs_check=False)
         self._retry.schedule(dt_util.utcnow())
 
     @callback
@@ -300,8 +396,7 @@ class FluentPetWebhookManager:
                     " arrive with the refresh interval until it is enabled again"
                 )
             self.auto_disabled = True
-            self.active = False
-            self._needs_check = True
+            self._async_set_state(active=False, needs_check=True)
             self._async_accepted()
             ir.async_create_issue(
                 self.hass,
@@ -332,11 +427,12 @@ class FluentPetWebhookManager:
         if self.auto_disabled:
             LOGGER.info("The FluentPet webhook is enabled again")
         self.auto_disabled = False
-        self.active = True
-        self._needs_check = False
+        failure_count = 0 if remote is None else remote.failure_count
+        self._async_set_state(
+            active=True, needs_check=False, failure_count=failure_count
+        )
         now = dt_util.utcnow()
-        failing = remote is not None and remote.failure_count > 0
-        self._verify_at = now if failing else now + SLOW_RETRY_MIN
+        self._verify_at = now if self.failing else now + SLOW_RETRY_MIN
         self._async_accepted()
         ir.async_delete_issue(self.hass, DOMAIN, webhook_issue_id(self.entry.entry_id))
 
@@ -387,8 +483,7 @@ class FluentPetWebhookManager:
         (see _async_get_url).
         """
         now = dt_util.utcnow()
-        self.active = False
-        self._needs_check = False
+        self._async_set_state(active=False, needs_check=False)
         if self._no_url_since is None:
             LOGGER.info(
                 "No external https URL for the FluentPet webhook; events arrive"
@@ -533,6 +628,9 @@ class FluentPetWebhookManager:
         except WebhookVerificationError as err:
             LOGGER.warning("Rejected a FluentPet webhook request: %s", err)
             return web.Response(status=HTTPStatus.UNAUTHORIZED)
+        # A signed request, a ping too, proves FluentPet reaches Home Assistant.
+        self.last_delivery = dt_util.utcnow()
+        self.async_update_health()
 
         try:
             event = parse_event_body(body)
@@ -540,7 +638,6 @@ class FluentPetWebhookManager:
             LOGGER.warning("Rejected a FluentPet webhook body: %s", err)
             return web.Response(status=HTTPStatus.BAD_REQUEST)
 
-        self.last_delivery = dt_util.utcnow()
         delivery = request.headers.get(HEADER_DELIVERY)
         if delivery is not None and not self.processor.seen_deliveries.add(delivery):
             LOGGER.debug("Ignoring repeated delivery %s", delivery)
@@ -551,5 +648,6 @@ class FluentPetWebhookManager:
             # twice once its id left the dedupe set.
             LOGGER.debug("Ignoring late delivery of event %s", event.id)
             return web.Response(status=HTTPStatus.OK)
+        self.processor.coordinator.async_base_seen(event)
         self.processor.async_process(event)
         return web.Response(status=HTTPStatus.OK)

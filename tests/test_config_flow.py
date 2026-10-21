@@ -29,7 +29,7 @@ from custom_components.fluentpet.fluentpet_api import (
 )
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from .common import load_json_fixture, setup_integration
@@ -363,6 +363,28 @@ async def test_options_flow(
     }
     coordinator = mock_config_entry.runtime_data.coordinator
     assert coordinator.update_interval.total_seconds() == 120
+
+
+@pytest.mark.parametrize("interval", [29, 3601])
+async def test_options_flow_interval_bounds(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    interval: int,
+) -> None:
+    """The refresh interval is refused below 30 or above 3600 seconds."""
+    await setup_integration(hass, mock_config_entry)
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_INTERVAL: interval,
+                CONF_PREFER_CLOUDHOOK: True,
+                "advanced": {CONF_API_BASE_URL: DEFAULT_BASE_URL},
+            },
+        )
+    assert mock_config_entry.options == {}
 
 
 async def test_reauth_not_admin(

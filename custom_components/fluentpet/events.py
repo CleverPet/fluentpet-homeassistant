@@ -86,7 +86,10 @@ class FluentPetEventProcessor:
         self._ready_buttons: set[str] = set()
         # Presses (event id and payload) for buttons without an event entity yet,
         # with the coordinator refresh count at the time they arrived.
-        self._pending: dict[str, tuple[int, deque[tuple[str, PressCreatedData]]]] = {}
+        # Each press keeps whether it is replayed.
+        self._pending: dict[
+            str, tuple[int, deque[tuple[str, PressCreatedData, bool]]]
+        ] = {}
 
     @property
     def pending_count(self) -> int:
@@ -94,8 +97,16 @@ class FluentPetEventProcessor:
         return sum(len(presses) for _, presses in self._pending.values())
 
     @callback
-    def async_process(self, event: Event) -> None:
-        """Process one event; repeated and held event ids are ignored."""
+    def async_process(
+        self, event: Event, *, refresh: bool = True, replayed: bool = False
+    ) -> None:
+        """Process one event; repeated and held event ids are ignored.
+
+        A lifecycle event, or a press of an unknown button, requests a refresh
+        of the resources, unless refresh is False: the feed events of a refresh
+        that read the resources itself. Replayed marks a press read from the
+        feed during catch-up.
+        """
         # A held id counts as seen even after it left the bounded seen set.
         if event.id in self.held_events or not self.seen_events.add(event.id):
             LOGGER.debug("Ignoring duplicate event %s", event.id)
@@ -103,15 +114,16 @@ class FluentPetEventProcessor:
         self.coordinator.async_schedule_save()
         data = event.data
         if isinstance(data, PressCreatedData):
-            self._async_press(event.id, data)
+            self._async_press(event.id, data, refresh, replayed)
         elif isinstance(data, InteractionUpdatedData):
             self.last_interaction = (event.id, data)
             async_dispatcher_send(
                 self.hass, signal_interaction(self.entry_id), event.id, data
             )
         elif event.type in LIFECYCLE_EVENT_TYPES:
-            LOGGER.debug("Refreshing after %s event", event.type)
-            self._async_request_refresh()
+            if refresh:
+                LOGGER.debug("Refreshing after %s event", event.type)
+                self._async_request_refresh()
         elif event.type == EventType.PING:
             LOGGER.debug("Received webhook ping %s", event.id)
         else:
@@ -145,23 +157,34 @@ class FluentPetEventProcessor:
         self.coordinator.async_schedule_save()
 
     @callback
-    def _async_press(self, event_id: str, data: PressCreatedData) -> None:
-        """Fire a press on its button entity, or keep it until the entity exists."""
+    def _async_press(
+        self, event_id: str, data: PressCreatedData, refresh: bool, replayed: bool
+    ) -> None:
+        """Fire a press on its button entity, or keep it until the entity exists.
+
+        Without refresh, the press was read by a refresh that read the buttons
+        after it: it counts as older than that read, so a button still unknown
+        is dropped at the end of that refresh.
+        """
         if data.button is None:
             LOGGER.debug("Ignoring a press without a button")
             return
         button_id = data.button.id
         if button_id in self._ready_buttons:
             async_dispatcher_send(
-                self.hass, signal_press(self.entry_id, button_id), event_id, data
+                self.hass,
+                signal_press(self.entry_id, button_id),
+                event_id,
+                data,
+                replayed,
             )
             return
+        refresh_count = self.coordinator.refresh_count - (0 if refresh else 1)
         _, presses = self._pending.setdefault(
-            button_id,
-            (self.coordinator.refresh_count, deque(maxlen=PENDING_PRESS_LIMIT)),
+            button_id, (refresh_count, deque(maxlen=PENDING_PRESS_LIMIT))
         )
-        presses.append((event_id, data))
-        if button_id not in self.coordinator.known_button_ids:
+        presses.append((event_id, data, replayed))
+        if refresh and button_id not in self.coordinator.known_button_ids:
             self._async_request_refresh()
 
     @callback
@@ -178,9 +201,13 @@ class FluentPetEventProcessor:
         """Mark a button entity as listening and fire its pending presses."""
         self._ready_buttons.add(button_id)
         if (pending := self._pending.pop(button_id, None)) is not None:
-            for event_id, data in pending[1]:
+            for event_id, data, replayed in pending[1]:
                 async_dispatcher_send(
-                    self.hass, signal_press(self.entry_id, button_id), event_id, data
+                    self.hass,
+                    signal_press(self.entry_id, button_id),
+                    event_id,
+                    data,
+                    replayed,
                 )
 
         def _remove() -> None:

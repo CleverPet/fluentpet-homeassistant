@@ -88,7 +88,7 @@
       }),
       'domain': 'fluentpet',
       'entry_id': '01J0FLUENTPETENTRY000000000',
-      'minor_version': 1,
+      'minor_version': 2,
       'options': dict({
       }),
       'pref_disable_new_entities': False,
@@ -103,11 +103,15 @@
     'feed': dict({
       'has_cursor': True,
       'pending_presses': 0,
-      'update_interval': 30.0,
+      'push_active': True,
+      'update_interval': 300.0,
     }),
     'webhook': dict({
       'active': True,
       'auto_disabled': False,
+      'failing': False,
+      'failure_count': 0,
+      'healthy': True,
       'last_delivery': None,
       'uses_cloudhook': False,
     }),

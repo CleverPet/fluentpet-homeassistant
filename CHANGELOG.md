@@ -8,10 +8,10 @@ All notable changes to this project are documented in this file.
 - FluentPet Connect integration (`fluentpet`), installable as a HACS custom
   integration. Requires Home Assistant 2026.10.0 or newer.
 - OAuth2 sign-in with PKCE through `auth.fluent.pet`, with the public FluentPet
-  client id imported as an application credential. Household chosen automatically
-  or from a list; accounts that are not the household admin are refused.
+  client id imported as an application credential. Sets up the household of
+  the signed-in account, which must be its admin; other accounts are refused.
   Reauthentication flow.
-- Options: refresh interval (10 to 3600 s, default 30) and prefer Home
+- Options: refresh interval (30 to 3600 s, default 60) and prefer Home
   Assistant Cloud (default on).
 - Devices: household hub, Bases, and Buttons linked to their Base. Devices are
   added and removed as the household changes.
@@ -26,7 +26,7 @@ All notable changes to this project are documented in this file.
 - Push through a FluentPet household webhook, delivered to a Home Assistant
   Cloud cloudhook or the external https URL, with HMAC signature verification,
   a 5 minute timestamp window and deduplication.
-- Event feed read every refresh interval, with the feed position and the
+- Event feed read at every refresh, with the feed position and the
   last processed event ids stored across restarts, so presses are neither
   missed nor fired twice. Backoff on rate limits and server errors, up to 10
   minutes.
@@ -38,6 +38,33 @@ All notable changes to this project are documented in this file.
   webhooks and event feed, vendored in the integration, with packaging metadata
   in `libs/fluentpet-api` for the future `fluentpet-api` PyPI package.
 - Brand folder from the official FluentPet symbol and the 2022 joined logo.
+- Push first: while the webhook is healthy, a safety poll every 5 minutes
+  reads the event feed, then the Bases (for their last seen time); Buttons and
+  learners are read after a Base, Button, learner or teacher was added,
+  changed or removed, after a feed press of an unknown Button, once when the
+  webhook becomes healthy, after a failed refresh, when the feed position was
+  reset, and on request. Healthy means registered, enabled, accepted and
+  checked, with no failed deliveries reported by FluentPet or a signed
+  delivery received in the last 10 minutes. Otherwise the integration polls
+  everything at the refresh interval, now the fallback cadence. Backoff
+  applies in both modes. A refresh interval below 30 s is raised to 30 s by a
+  config entry migration (version 1.2).
+- A press or interaction delivered by the webhook moves the last seen time of
+  its Base forward, without a request; a refresh in flight or a Bases read
+  with an older or unknown time does not move it back until Home Assistant
+  restarts or the integration reloads.
+- A refresh that reads a press of an unknown Button reads the Buttons and
+  learners in the same refresh, and drops the press there when the Button is
+  still unknown, without a second round.
+- Every refresh reads the event feed before the Bases, Buttons and learners,
+  so they are at least as new as its events.
+- The webhook check every 5 minutes also runs when the refresh timer fires a
+  little early.
+- Diagnostics show whether push is active and the webhook's health and
+  failure count.
+- A lifecycle event read from the feed no longer requests another refresh: a
+  polling refresh read the resources already, and a safety poll reads them
+  once in the same poll.
 - Push recovery: without a usable URL or after FluentPet refused the webhook,
   registration is tried again after 5 minutes, then at doubling intervals up
   to an hour, and when Home Assistant Cloud connects. A registered endpoint or
@@ -52,7 +79,10 @@ All notable changes to this project are documented in this file.
   a network error. The `Retry-After` of a rate limit is honored.
 - Late webhook retries of events older than 10 minutes are acknowledged but
   not fired again.
-- Press entities get a `replayed` attribute. Press and last interaction
+- Press entities get a `replayed` attribute: `true` for a press read from the
+  feed during catch-up (after startup, a reload or failed refreshes, or while
+  the feed was not readable, until the feed is read to its end), `false` for pushed presses and for a missed press
+  a later refresh reads, whatever its age. Press and last interaction
   entities are unavailable while refreshes fail and the webhook is not active;
   events that arrive meanwhile fire once they are available again.
 - The household list in setup offers only households the account administers

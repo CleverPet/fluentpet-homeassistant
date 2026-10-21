@@ -217,7 +217,7 @@ ON_BATTERY = "sensor.base_testserial0002_last_seen"
 
 async def _refresh(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
     """Move time past the refresh interval."""
-    freezer.tick(timedelta(seconds=31))
+    freezer.tick(timedelta(seconds=61))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 

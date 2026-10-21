@@ -26,8 +26,9 @@ CONF_PREFER_CLOUDHOOK: Final = "prefer_cloudhook"
 # Advanced option: the FluentPet API host, for developers. Absent means the
 # library's DEFAULT_BASE_URL.
 CONF_API_BASE_URL: Final = "api_base_url"
-DEFAULT_SCAN_INTERVAL: Final = 30
-MIN_SCAN_INTERVAL: Final = 10
+# The refresh interval applies while push is unavailable; see SAFETY_POLL_INTERVAL.
+DEFAULT_SCAN_INTERVAL: Final = 60
+MIN_SCAN_INTERVAL: Final = 30
 MAX_SCAN_INTERVAL: Final = 3600
 DEFAULT_PREFER_CLOUDHOOK: Final = True
 MAX_BACKOFF: Final = timedelta(minutes=10)
@@ -45,6 +46,9 @@ FEED_PAGE_LIMIT: Final = 100
 FEED_MAX_PAGES: Final = 50
 STORAGE_VERSION: Final = 1
 STORE_SAVE_DELAY: Final = 5
+# While the webhook is healthy, the event feed (to catch up events the webhook
+# missed) and the Bases (for their last seen time) are read this often.
+SAFETY_POLL_INTERVAL: Final = timedelta(minutes=5)
 
 DEDUPE_SIZE: Final = 512
 PENDING_PRESS_LIMIT: Final = 20
@@ -56,13 +60,17 @@ STATE_MAX_LENGTH: Final = 255
 # A webhook delivery of an event FluentPet stored longer ago than this is a late
 # retry; the feed, read every refresh, has processed the event already.
 WEBHOOK_STALE_EVENT_AGE: Final = timedelta(minutes=10)
-# A press fired later than this after it happened is marked as replayed.
-REPLAYED_PRESS_AGE: Final = timedelta(minutes=2)
 
 # Slow retry of what will not work on the next refresh: no usable webhook URL, a
 # webhook FluentPet refused, or a feed only the household admin may read.
 SLOW_RETRY_MIN: Final = timedelta(minutes=5)
 SLOW_RETRY_MAX: Final = timedelta(hours=1)
+# An active webhook is verified every SLOW_RETRY_MIN, at the refresh that falls
+# due; a refresh up to this much early (timer rounding) still verifies.
+VERIFY_SLACK: Final = timedelta(seconds=30)
+# A verified webhook delivery this recent keeps the webhook healthy while
+# FluentPet still counts failed deliveries.
+WEBHOOK_DELIVERY_WINDOW: Final = timedelta(minutes=10)
 
 EVENT_PRESS: Final = "press"
 ISSUE_WEBHOOK_DISABLED: Final = "webhook_disabled"

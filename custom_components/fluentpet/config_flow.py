@@ -58,6 +58,9 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
     """Link a FluentPet household with OAuth2."""
 
     DOMAIN = DOMAIN
+    VERSION = 1
+    # 1.2 raised the minimum refresh interval to MIN_SCAN_INTERVAL.
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the flow."""
@@ -266,7 +269,7 @@ OPTIONS_SCHEMA = probatio.Schema(
 
 
 class FluentPetOptionsFlow(OptionsFlowWithReload):
-    """Change the refresh interval and the webhook URL preference."""
+    """Change the fallback refresh interval and the webhook URL preference."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

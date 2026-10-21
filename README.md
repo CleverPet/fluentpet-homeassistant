@@ -35,9 +35,10 @@ mode and battery level.
 - Shows the words of the household's latest interaction in a sensor.
 - Shows when each FluentPet Connect Base was last seen, whether it runs plugged
   in or on battery, and its battery level.
-- Receives events by push through a FluentPet household webhook. When Home
-  Assistant has no usable https URL, it reads the FluentPet event feed at a
-  fixed interval instead.
+- Receives events by push through a FluentPet household webhook, and checks
+  the FluentPet event feed and the Bases every 5 minutes. When push is
+  unavailable (for example Home Assistant has no usable https URL), it polls
+  FluentPet at the refresh interval instead.
 - Adds Bases and Buttons that join the household later, and removes devices
   that leave it.
 
@@ -84,7 +85,7 @@ the latest press. Attributes of the latest press:
 | `press_order` | Position of the press in its interaction |
 | `occurred_at` | When the press happened, ISO 8601 |
 | `interaction_id` | FluentPet id of the interaction the press belongs to, or `null` |
-| `replayed` | `true` when the press fired more than 2 minutes after it happened, for example a press read from the feed after Home Assistant was offline |
+| `replayed` | `true` for a press read from the event feed during catch-up: after Home Assistant starts or the integration reloads, after failed refreshes, or while the feed was not readable, until the feed is read to its end. `false` for presses the webhook delivers, and for a press the webhook missed that a later refresh reads |
 
 The entity is unavailable only while refreshes from FluentPet fail and the
 webhook is not active. Presses read from the feed fire after the refresh that
@@ -140,8 +141,8 @@ history shows when a Base ran on battery and how its charge went.
   refuses accounts that are not the admin.
 - For push updates: either Home Assistant Cloud with an active subscription, or
   an external URL for Home Assistant that starts with `https://` and is
-  reachable from the internet. Without either, presses arrive from the event
-  feed at the refresh interval.
+  reachable from the internet. Without either, the integration polls FluentPet
+  at the refresh interval.
 
 ## Installation
 
@@ -170,15 +171,12 @@ signs in with PKCE and has no secret.
    choose one.
 4. Sign in with the FluentPet account of the household admin on
    `auth.fluent.pet` and allow access.
-5. The integration lists the households of the account that it can set up:
-   households the account is the admin of and that are not configured yet.
-   - With one such household, it is chosen automatically.
-   - With several, choose one from the list. To add another household, add the
-     integration again.
+5. The integration sets up the household of the signed-in account, which must
+   be its admin.
 
-Setup stops with a message when the account belongs to no household, when
-every household of the account is already configured, or when the account is
-not the admin of any household that is not configured yet.
+Setup stops with a message when the account belongs to no household, when its
+household is already configured, or when the account is not the admin of its
+household.
 
 When the sign-in expires or is revoked, Home Assistant asks you to sign in
 again. Use an account with access to the same household.
@@ -190,9 +188,12 @@ Changing an option reloads the integration.
 
 | Option | Default | Range | Description |
 | --- | --- | --- | --- |
-| Refresh interval | 30 s | 10 to 3600 s | Seconds between refreshes of the Bases, Buttons and the event feed. |
+| Refresh interval | 60 s | 30 to 3600 s | Fallback when push is unavailable (no usable https URL from Home Assistant Cloud or an external https URL, a webhook FluentPet refused, disabled or fails to deliver to, or a failed webhook check): seconds between refreshes of the Bases, Buttons, learners and the event feed. While the webhook delivers, events are pushed and the event feed and the Bases are checked every 5 minutes. |
 | Prefer Home Assistant Cloud | On | | With an active Home Assistant Cloud subscription, receive events through a Home Assistant Cloud webhook (cloudhook) instead of your external URL. |
 | API base URL (advanced) | The FluentPet API | An https URL | Under **Advanced options**. For developers only; keep the default. |
+
+A refresh interval below 30 s, set in an earlier version, is raised to 30 s
+when the integration loads.
 
 Developers can point the integration at another API host from the advanced
 options. Changing it registers a new webhook endpoint at the new host; the
@@ -210,9 +211,9 @@ follows:
    subscription, it uses a cloudhook.
 2. Otherwise it uses the external URL of Home Assistant, if it starts with
    `https://`.
-3. Without a usable https URL, it reads the event feed instead, and tries
-   again 5 minutes later, then at doubling intervals up to once an hour, and
-   whenever Home Assistant Cloud connects.
+3. Without a usable https URL, it polls at the refresh interval instead, and
+   tries again 5 minutes later, then at doubling intervals up to once an hour,
+   and whenever Home Assistant Cloud connects.
 
 A registered cloudhook is kept while **Prefer Home Assistant Cloud** is on and
 Home Assistant Cloud is signed in, also while the cloud is disconnected or its
@@ -226,7 +227,7 @@ When the cloudhook URL changes, the endpoint is updated to the new URL.
 While the webhook is active, the integration reads the FluentPet endpoint
 again every 5 minutes, and at every refresh while FluentPet reports failed
 deliveries. An endpoint FluentPet disabled raises the repair issue below and
-the feed takes over; one that was deleted is created again; one disabled by
+polling takes over; one that was deleted is created again; one disabled by
 hand or pointing at another URL is enabled again and updated.
 
 If FluentPet creates the endpoint but its answer cannot be read, the
@@ -248,16 +249,48 @@ Every delivery is checked before it is processed:
   once even when FluentPet retries a delivery or the same event also arrives
   from the feed.
 - A delivery of an event FluentPet stored more than 10 minutes earlier (a late
-  retry) is answered but not processed: the feed, read every refresh interval,
-  has processed that event already, or reads it from its stored position.
+  retry) is answered but not processed: the feed, read at every refresh, has
+  processed that event already, or reads it from its stored position.
+
+### Push first, polling as fallback
+
+The integration works in one of two modes:
+
+- **Push.** Events arrive within seconds through the webhook. A safety poll
+  every 5 minutes reads the event feed, to catch up events the webhook missed
+  and keep the stored feed position current, and then the Bases, for their
+  last seen time: two requests, plus the webhook check every 5 minutes.
+  Buttons and learners are read after their events (see
+  [Bases and Buttons](#bases-and-buttons)).
+- **Polling.** Every refresh interval reads the event feed, then the Bases,
+  Buttons and learners.
+
+Push is used while the webhook is healthy:
+
+- it is registered and enabled, FluentPet accepted it, and the last check of
+  it succeeded; and
+- FluentPet reports no failed deliveries, or Home Assistant received a
+  signed delivery (a ping counts too) in the last 10 minutes. FluentPet
+  counts failed deliveries in a row and resets the count only after a
+  delivered event, so a recent delivery shows that the webhook works while
+  the count is still above 0.
+
+Otherwise the integration polls: without a usable https URL (Home Assistant
+Cloud or an external https URL), when FluentPet refused or disabled the
+webhook, when it reports failed deliveries and nothing arrived for 10 minutes,
+or when the last webhook check failed. The health is evaluated again at every
+refresh and on every delivery, and the integration switches modes as it
+changes. So a 10 minute window without deliveries that runs out is noticed
+at the next refresh (up to 5 minutes later, or 10 during backoff). The first
+refresh after the webhook becomes healthy still reads everything once, and so
+does the refresh after a failed one. The mode only sets how fast changes
+arrive: the safety poll's feed read catches up any event the webhook missed.
 
 ### Event feed
 
-The household event feed is read every refresh interval, also while the
-webhook is active. With a webhook, presses arrive within seconds and the feed
-read keeps the stored feed position current; without one (no usable https
-URL, FluentPet refused the webhook, or FluentPet disabled it), the feed read is
-how presses arrive.
+The household event feed is read at every refresh, in both modes. With push,
+presses arrive within seconds and the feed read keeps the stored feed
+position current; while polling, the feed read is how presses arrive.
 
 Events read from the feed are applied only when the whole refresh succeeds,
 and the stored position moves only then. A refresh that fails part way reads
@@ -273,22 +306,34 @@ the same events again next time; events already processed do not fire twice.
   the household, for example after the stored file was damaged. The
   integration then logs a warning and continues from the end of the feed, so
   events since the last refresh can be missed. A stored file of the wrong
-  shape is handled the same way.
+  shape is handled the same way. In push mode the same refresh then also
+  reads the Buttons and learners, since changes to them may be among the
+  missed events.
 - **Malformed events.** An event in the feed that cannot be read is skipped
   with a warning; the feed position still moves past it.
 
 ### Bases and Buttons
 
-The lists of Bases, Buttons, learners and teachers are refreshed every refresh
-interval, also when the webhook is active. The last seen time, power mode and
-battery level of each Base come from this refresh, so they lag by up to one
-interval. When FluentPet reports that a Base,
-Button, learner or teacher was added, changed or removed, the integration
-refreshes right away.
+Every refresh reads the Bases, Buttons and learners after the event feed, so
+they are at least as new as the events of that refresh. While polling, they
+are all read every refresh interval. In push mode the safety poll reads the
+Bases every 5 minutes; the Buttons and learners are read when FluentPet
+reports that a Base, Button, learner or teacher was added, changed or removed
+(for example a `base.updated` event when the battery level or power mode of a
+Base changes). Such an event delivered by the webhook reads them right away.
+One read from the feed costs no extra refresh: a polling refresh read them
+already, and a safety poll that finds such an event the webhook missed reads
+them once, in the same poll. A press or interaction delivered by the webhook
+moves the last seen time of its Base forward to when FluentPet stored the
+event, without a request. A later read with an older or unknown time does
+not move it back until Home Assistant restarts or the integration reloads.
 
-A press on a Button that Home Assistant does not know yet triggers a refresh;
-the press fires once the Button's event entity exists. Presses of a Button
-that is still unknown after the next refresh are dropped.
+A press on a Button that Home Assistant does not know yet fires once the
+Button's event entity exists. When the webhook delivers it, it triggers a
+refresh. When the feed delivers it, the refresh that read it also reads the
+Buttons, in both modes, so no second refresh follows. A press of a Button that
+is still unknown after a Buttons read that started after the press arrived is
+dropped.
 
 A Base, Button, learner or teacher that FluentPet returns in a shape the
 integration cannot read is skipped with a warning. While any item is skipped,
@@ -296,18 +341,20 @@ no devices are removed, so a malformed item does not remove its device.
 
 ### Errors and backoff
 
-- On a rate limit (HTTP 429) or a FluentPet server error, the refresh interval
-  doubles after each failure, up to 10 minutes. It returns to the configured
-  interval after the next successful refresh. When a rate limit answer says
-  how long to wait (`Retry-After`), the next refresh waits that long instead.
+- On a rate limit (HTTP 429) or a FluentPet server error, the interval
+  doubles after each failure, up to 10 minutes, in both modes. It returns to
+  the interval of the current mode (5 minutes in push mode, the refresh
+  interval while polling) after the next successful refresh. When a rate
+  limit answer says how long to wait (`Retry-After`), the next refresh waits
+  that long instead.
 - When FluentPet refuses the access token, or the sign-in server refuses to
   renew it, Home Assistant asks you to sign in again and stops refreshing until
   you do. When the sign-in server fails for the moment, the refresh is retried.
-- When registering the webhook fails for a temporary reason, the integration
-  tries again at the next refresh and reads the feed meanwhile.
+- When registering or checking the webhook fails for a temporary reason, the
+  integration polls and tries again at the next refresh.
 - When FluentPet refuses the webhook (for example an invalid URL, or the
   household already has the most webhooks FluentPet allows), the integration
-  reads the feed and tries again 5 minutes later, then at doubling intervals up
+  polls and tries again 5 minutes later, then at doubling intervals up
   to once an hour. When the household is at its webhook limit, a repair issue,
   **FluentPet webhook limit reached**, explains how to free a slot.
 - When FluentPet answers that the account is not allowed (it is no longer the
@@ -318,11 +365,11 @@ no devices are removed, so a malformed item does not remove its device.
 ### Disabled webhook
 
 FluentPet disables a webhook endpoint after 20 failed deliveries in a row. The
-integration keeps reading the event feed every refresh interval and raises a
-repair issue, **FluentPet webhook disabled**. Check that Home Assistant is
-reachable from the internet, then enable the webhook again on
+integration polls at the refresh interval and raises a repair issue,
+**FluentPet webhook disabled**. Check that Home Assistant is reachable from
+the internet, then enable the webhook again on
 [my.fluent.pet](https://my.fluent.pet). The repair issue goes away at the next
-refresh after the webhook is enabled.
+refresh after the webhook is enabled, and push takes over again.
 
 ## Use cases and automation examples
 
@@ -375,9 +422,11 @@ automation:
 
 ### Ignore presses replayed after a restart
 
-Presses that happened while Home Assistant was offline are read from the
-feed at startup and fire with their original `occurred_at`, with `replayed`
-set to `true`. This condition skips them:
+Presses that happened while Home Assistant was offline, while refreshes
+failed, or while the feed was not readable, are read from the feed when it
+catches up and fire with their original `occurred_at`, with `replayed` set to
+`true`. A press the webhook missed and a later refresh reads is not marked
+replayed. This condition skips the replayed ones:
 
 ```yaml
 conditions:
@@ -464,7 +513,12 @@ automation:
 
 ## Known limitations
 
-- The last seen time, power mode and battery level of a Base are polled, so a
+- In push mode, battery level and power mode changes arrive as pushed
+  `base.updated` and `button.updated` events, so they are current while
+  deliveries work. The last seen time of a Base, and a battery or power mode
+  change whose webhook delivery was missed, can be up to 5 minutes behind (up
+  to 10 minutes during backoff); the safety poll catches them. A pushed press
+  or interaction moves the last seen time forward sooner. While polling, a
   change shows up after up to one refresh interval, or up to 10 minutes during
   backoff. How often a Base checks in, and so how fresh its last seen time is,
   is up to the Base.

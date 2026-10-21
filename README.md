@@ -3,8 +3,8 @@
 A Home Assistant custom integration for [FluentPet Connect](https://fluent.pet).
 It adds the Bases and Buttons of a FluentPet household to Home Assistant, fires
 an event entity when a learner or teacher presses a Button, shows the words of
-the latest interaction, and shows when each Base was last seen, with its power
-mode and battery level.
+the latest interaction, and shows when each Base last reported, its power mode,
+and the battery level of each Base and Button.
 
 > **Status: pre-release.** Sign-in depends on FluentPet API endpoints that are
 > not available yet. Nothing here is ready to install.
@@ -33,8 +33,9 @@ mode and battery level.
 - Fires an event entity each time a Button is pressed, with the Button, the
   learner or teacher who pressed it and the interaction the press belongs to.
 - Shows the words of the household's latest interaction in a sensor.
-- Shows when each FluentPet Connect Base was last seen, whether it runs plugged
-  in or on battery, and its battery level.
+- Shows when each FluentPet Connect Base last reported and whether it runs
+  plugged in or on battery.
+- Shows the battery level of each Base and of each Button linked to a Base.
 - Receives events by push through a FluentPet household webhook, and checks
   the FluentPet event feed and the Bases every 5 minutes. When push is
   unavailable (for example Home Assistant has no usable https URL), it polls
@@ -68,6 +69,8 @@ Entities:
 | Press | `event`, device class `button` | Each Button | `event.outside_press` |
 | Last interaction | `sensor` | Household | `sensor.smith_home_last_interaction` |
 | Last seen | `sensor`, device class `timestamp` | Each Base | `sensor.kitchen_base_last_seen` |
+| Battery | `sensor`, device class `battery`, diagnostic | Each Base | `sensor.kitchen_base_battery` |
+| Battery | `sensor`, device class `battery`, diagnostic | Each Button linked to a Base | `sensor.outside_battery` |
 
 Entity ids are derived from the device name and the entity name, so they
 depend on the names in your household.
@@ -120,17 +123,48 @@ shown once the sensor is available again.
 
 ### Last seen sensor
 
-One per Base. The state is when FluentPet last heard from the Base, or
-unknown when FluentPet does not say. The sensor is unavailable while refreshes
-from FluentPet fail. Attributes:
+One per Base. The state is the time of the Base's last report to FluentPet,
+or unknown when FluentPet does not say. It is not an online or liveness
+signal: a Base reports only on activity (for example a press) or on its own
+schedule, so hours without a report are normal. The sensor is unavailable
+while refreshes from FluentPet fail. Attributes:
 
 | Attribute | Content |
 | --- | --- |
 | `power_mode` | `plugged_in` or `battery`, or `null` when FluentPet does not say |
-| `battery_level` | Battery charge in percent, 0 to 100, or `null` when FluentPet does not say |
 
-The state and both attributes are kept in the recorder history, so the
-history shows when a Base ran on battery and how its charge went.
+The state and the attribute are kept in the recorder history, so the history
+shows when a Base ran on battery.
+
+### Battery sensors
+
+One per Base and one per Button linked to a Base, named **Battery**, in the
+diagnostic category. The state is the battery charge in percent. The
+precision is coarse: FluentPet reports only the values 100, 75, 50, 25 and 0,
+the same steps the FluentPet app shows, so the sensor changes in steps of 25.
+
+A battery sensor is unavailable while refreshes from FluentPet fail and while
+FluentPet reports no battery level for the device. A Button reports its level
+through its Base when it is pressed, so a Button's battery sensor is
+unavailable until its first press after FluentPet started reporting Button
+levels. FluentPet also reports no level for a Button whose battery is empty,
+so a Button battery sensor that becomes unavailable after showing a level can
+mean the battery needs replacing. A Base can report no level while it
+charges. A Button that is not linked to a Base has no battery sensor; the
+sensor is removed when the Button is unlinked and comes back when it is
+linked again.
+
+The battery sensors have no attributes of their own. Whether a Base runs
+plugged in or on battery is the `power_mode` attribute of its
+[Last seen sensor](#last-seen-sensor), which stays available while the
+battery sensor is unavailable.
+
+When the battery level of a Base or Button moves to another step, FluentPet
+sends a `base.updated` or `button.updated` event. Delivered by the webhook,
+it makes the integration read the Bases and Buttons right away, so the sensor
+follows without waiting for the safety poll. A delivery the webhook missed is
+caught by the next safety poll, and while polling the change shows up at the
+next refresh; see [Bases and Buttons](#bases-and-buttons).
 
 ## Requirements
 
@@ -259,7 +293,8 @@ The integration works in one of two modes:
 - **Push.** Events arrive within seconds through the webhook. A safety poll
   every 5 minutes reads the event feed, to catch up events the webhook missed
   and keep the stored feed position current, and then the Bases, for their
-  last seen time: two requests, plus the webhook check every 5 minutes.
+  last seen time, power mode and battery level: two requests, plus the
+  webhook check every 5 minutes.
   Buttons and learners are read after their events (see
   [Bases and Buttons](#bases-and-buttons)).
 - **Polling.** Every refresh interval reads the event feed, then the Bases,
@@ -376,8 +411,8 @@ refresh after the webhook is enabled, and push takes over again.
 - Turn on the porch light when a learner or teacher presses **Outside**.
 - Play a sound or send a notification for a specific word.
 - React to a combination of words, such as **outside** followed by **play**.
-- Get notified when a Base has not been seen for a while, when it switches to
-  battery, or when its battery runs low.
+- Get notified when the battery of a Base on battery power, or of a Button,
+  runs low.
 
 ### Trigger on a Button press
 
@@ -459,57 +494,137 @@ automation:
           message: "Outside, then play"
 ```
 
-### Base not seen for 2 hours
+### Base battery low
 
-The Last seen sensor of a Base named **Kitchen Base** is
-`sensor.kitchen_base_last_seen`. Its state is the time FluentPet last heard
-from the Base. This template trigger fires once when that time becomes more
-than 2 hours old, and again only after the Base was seen and went quiet again.
-An unknown last seen does not trigger it.
-
-```yaml
-automation:
-  - alias: "Kitchen Base not seen"
-    triggers:
-      - trigger: template
-        value_template: >
-          {% set last_seen = states('sensor.kitchen_base_last_seen') | as_datetime(none) %}
-          {{ last_seen is not none and now() - last_seen > timedelta(hours=2) }}
-    actions:
-      - action: notify.notify
-        data:
-          message: "The kitchen Base has not been seen for 2 hours"
-```
-
-### Base on battery or low battery
-
-The `power_mode` and `battery_level` attributes of the Last seen sensor tell
-when a Base runs on battery and how full it is.
+Notifies once when the battery of the Base named **Kitchen Base** is at 25% or
+lower while it is not plugged in, and not again until the level rises above
+25% or the Base is plugged in. A Toggle helper remembers that the notification
+was sent; create it under **Settings > Devices & services > Helpers**, or in
+YAML as below. The battery sensor has no power mode, so the plugged in check
+reads the `power_mode` attribute of the Last seen sensor, which also stays
+available while the battery sensor is unavailable (FluentPet can report no
+level while a Base charges). The levels are 100, 75, 50, 25 and 0, so
+`below: 26` means 25 or lower.
 
 ```yaml
+input_boolean:
+  kitchen_base_battery_low_notified:
+    name: Kitchen Base battery low notified
+
 automation:
-  - alias: "Kitchen Base power"
+  - alias: "Kitchen Base battery low"
+    mode: queued
     triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: numeric_state
+        entity_id: sensor.kitchen_base_battery
+        below: 26
+      - trigger: numeric_state
+        entity_id: sensor.kitchen_base_battery
+        above: 25
       - trigger: state
         entity_id: sensor.kitchen_base_last_seen
         attribute: power_mode
-        to: battery
-        id: on_battery
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_base_last_seen
-        attribute: battery_level
-        below: 20
-        id: low_battery
     actions:
-      - action: notify.notify
-        data:
-          message: >
-            {% if trigger.id == 'on_battery' %}
-              The kitchen Base runs on battery
-            {% else %}
-              The kitchen Base battery is below 20%
-            {% endif %}
+      - choose:
+          - conditions:
+              - condition: or
+                conditions:
+                  - condition: numeric_state
+                    entity_id: sensor.kitchen_base_battery
+                    above: 25
+                  - condition: state
+                    entity_id: sensor.kitchen_base_last_seen
+                    attribute: power_mode
+                    state: plugged_in
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.kitchen_base_battery_low_notified
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.kitchen_base_battery
+                below: 26
+              - condition: state
+                entity_id: input_boolean.kitchen_base_battery_low_notified
+                state: "off"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.kitchen_base_battery_low_notified
+              - action: notify.notify
+                data:
+                  message: >
+                    The kitchen Base battery is at
+                    {{ states('sensor.kitchen_base_battery') }}%
 ```
+
+The first option resets the helper when the level is above 25% or the Base is
+plugged in; only when neither holds does the second option notify, so a Base
+that is unplugged while its level is already low notifies at that moment. The
+start trigger checks a Base that is already low when Home Assistant starts;
+the helper keeps its state across restarts, so a notification already sent
+is not sent again, and a sensor still unavailable at start matches neither
+option and is handled by the numeric state trigger once it has a level.
+
+### Button battery low
+
+The same for the Button named **Outside**, without the power mode: it
+notifies once when the battery is at 25% or lower, and not again until the
+level rises above 25%, for example after the battery is replaced.
+
+```yaml
+input_boolean:
+  outside_button_battery_low_notified:
+    name: Outside Button battery low notified
+
+automation:
+  - alias: "Outside Button battery low"
+    mode: queued
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: numeric_state
+        entity_id: sensor.outside_battery
+        below: 26
+      - trigger: numeric_state
+        entity_id: sensor.outside_battery
+        above: 25
+    actions:
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.outside_battery
+                above: 25
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.outside_button_battery_low_notified
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.outside_battery
+                below: 26
+              - condition: state
+                entity_id: input_boolean.outside_button_battery_low_notified
+                state: "off"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.outside_button_battery_low_notified
+              - action: notify.notify
+                data:
+                  message: >
+                    The Outside Button battery is at
+                    {{ states('sensor.outside_battery') }}%
+```
+
+The automation does not fire when a Button goes straight from above 25% to no
+level: a Button reports only when pressed, so a rarely pressed Button can skip
+steps until its battery is empty, and FluentPet reports an empty Button
+battery as no level. It does not trigger on unavailable, because the sensor
+is also unavailable while refreshes from FluentPet fail, which would send
+false notifications.
 
 ## Known limitations
 
@@ -526,7 +641,7 @@ automation:
   start, with their original `occurred_at` and `replayed` set to `true`. At
   most 5,000 events are read per refresh; a longer backlog continues at the
   next refresh.
-- While refreshes from FluentPet fail, the last seen sensors are
+- While refreshes from FluentPet fail, the last seen and battery sensors are
   unavailable. The press entities and the last interaction sensor stay
   available while the webhook is active; without the webhook they are
   unavailable too, and the presses and interactions read once refreshes work
@@ -586,7 +701,15 @@ their account. The issue goes away once admin access returns.
 **A Base's last seen sensor is unavailable.** The last refresh from FluentPet
 failed. Check the Home Assistant logs for errors from
 `custom_components.fluentpet`. A last seen of unknown means FluentPet has not
-reported when it last heard from the Base.
+reported when it last heard from the Base. A last seen hours ago is normal: a
+Base reports only on activity or on its own schedule.
+
+**A battery sensor is unavailable.** FluentPet reports no battery level for
+the device yet. A Button reports its level when it is pressed, so press it
+once. A Button battery sensor that becomes unavailable after showing a level
+can mean the battery is empty and needs replacing: FluentPet reports an empty
+Button battery as no level. A Base can report no level while it charges.
+Otherwise the last refresh from FluentPet failed; check the logs as above.
 
 **A new Button has no entity.** New Buttons are added at the next refresh, or
 right away when FluentPet reports the change. Reload the integration to force

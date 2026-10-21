@@ -56,7 +56,8 @@ The list methods (`async_get_bases`, `async_get_buttons`, `async_get_learners` a
 `async_get_events`) take an optional `on_invalid` callback: with it, a malformed item is skipped
 and its `FluentPetParseError` passed to the callback instead of failing the whole response. A
 `Base` carries `last_online_at`, `power_mode` (`"plugged_in"` or `"battery"`, another string kept
-as is) and `battery_level` (0 to 100), each `None` when unknown.
+as is), `battery_level` (snapped by FluentPet to 100, 75, 50, 25 or 0) and `battery_updated_at`,
+each `None` when unknown. A `Button` carries `battery_level` and `battery_updated_at` the same way.
 
 Errors are `FluentPetError` subclasses: `FluentPetAuthError` (401), `FluentPetForbiddenError`
 (403, for example a member who is not the household admin reading webhooks or events),

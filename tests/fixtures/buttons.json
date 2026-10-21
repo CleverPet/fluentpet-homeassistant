@@ -6,7 +6,9 @@
       "normalized_word": "outside",
       "base_id": "base_testbaseoneaaaaaaaaaaaaaaa",
       "serial": "TESTBTNSER01",
-      "audio_id": "aud_testaudiooutsideaaaaaaaaaa"
+      "audio_id": "aud_testaudiooutsideaaaaaaaaaa",
+      "battery_level": 75,
+      "battery_updated_at": "2026-10-17T11:50:00.000Z"
     },
     {
       "id": "btn_testbuttonplayaaaaaaaaaaaa",
@@ -14,7 +16,9 @@
       "normalized_word": "play",
       "base_id": "base_testbaseoneaaaaaaaaaaaaaaa",
       "serial": "TESTBTNSER02",
-      "audio_id": null
+      "audio_id": null,
+      "battery_level": null,
+      "battery_updated_at": null
     },
     {
       "id": "btn_testbuttonwalkaaaaaaaaaaaa",
@@ -22,7 +26,9 @@
       "normalized_word": "walk",
       "base_id": null,
       "serial": null,
-      "audio_id": null
+      "audio_id": null,
+      "battery_level": null,
+      "battery_updated_at": null
     }
   ]
 }

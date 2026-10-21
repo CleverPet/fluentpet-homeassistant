@@ -186,6 +186,8 @@ def test_base_updated() -> None:
         "name": ("Base 1", "Test Base"),
         "default_learner": (None, LEARNER_ID),
         "group_interactions_within_seconds": (10, 15),
+        "battery_level": (100, 75),
+        "power_mode": ("plugged_in", "battery"),
     }
 
 
@@ -216,6 +218,7 @@ def test_button_updated() -> None:
     assert isinstance(data, ButtonEventData)
     assert data.changes["normalized_word"] == ("out", "outside")
     assert data.changes["audio_id"] == (None, "aud_testaudiooutsideaaaaaaaaaa")
+    assert data.changes["battery_level"] == (75, 50)
 
 
 def test_button_linked() -> None:
@@ -395,6 +398,7 @@ def test_resource_tolerance() -> None:
     assert base.last_online_at is None
     assert base.power_mode is None
     assert base.battery_level is None
+    assert base.battery_updated_at is None
     base = Base.from_dict(
         {"id": BASE_ID, "serial": "TESTSERIAL0001", "last_online_at": "garbage"}
     )
@@ -402,6 +406,8 @@ def test_resource_tolerance() -> None:
     button = Button.from_dict({"id": BTN_OUT, "name": "Outside"})
     assert button.normalized_word is None
     assert button.audio_id is None
+    assert button.battery_level is None
+    assert button.battery_updated_at is None
     with pytest.raises(FluentPetParseError):
         Learner.from_dict({"id": LEARNER_ID, "name": "Test Learner"})
 
@@ -476,3 +482,37 @@ def test_base_battery_level(battery_level: object, expected_level: int | None) -
         {"id": BASE_ID, "serial": "TESTSERIAL0001", "battery_level": battery_level}
     )
     assert base.battery_level == expected_level
+
+
+@pytest.mark.parametrize(
+    ("battery_level", "expected_level"),
+    [(75, 75), (0, 0), (None, None), (150, None), ("75", None)],
+)
+def test_button_battery_level(
+    battery_level: object, expected_level: int | None
+) -> None:
+    """A button's battery level is read like a Base's."""
+    button = Button.from_dict(
+        {"id": BTN_OUT, "name": "Outside", "battery_level": battery_level}
+    )
+    assert button.battery_level == expected_level
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-10-17T11:30:00.000Z", datetime(2026, 10, 17, 11, 30, tzinfo=UTC)),
+        (None, None),
+        ("garbage", None),
+    ],
+)
+def test_battery_updated_at(raw: object, expected: datetime | None) -> None:
+    """The time of the battery reading is optional on Bases and buttons."""
+    base = Base.from_dict(
+        {"id": BASE_ID, "serial": "TESTSERIAL0001", "battery_updated_at": raw}
+    )
+    assert base.battery_updated_at == expected
+    button = Button.from_dict(
+        {"id": BTN_OUT, "name": "Outside", "battery_updated_at": raw}
+    )
+    assert button.battery_updated_at == expected

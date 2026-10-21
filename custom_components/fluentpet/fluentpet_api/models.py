@@ -175,8 +175,10 @@ class Base:
         last_online_at: When FluentPet last heard from the Base, or None.
         power_mode: "plugged_in" or "battery" as sent (another string is kept as
             is), or None when unknown.
-        battery_level: Battery charge in percent, 0 to 100, or None when unknown or
-            not a whole number in that range.
+        battery_level: Battery charge in percent, snapped to 100, 75, 50, 25 or 0 (the
+            steps of the FluentPet app), or None when unknown or not a whole number
+            from 0 to 100.
+        battery_updated_at: When FluentPet received the latest battery reading, or None.
     """
 
     id: str
@@ -188,6 +190,7 @@ class Base:
     last_online_at: datetime | None
     power_mode: str | None = None
     battery_level: int | None = None
+    battery_updated_at: datetime | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
@@ -202,6 +205,7 @@ class Base:
             last_online_at=_opt_datetime(data, "last_online_at"),
             power_mode=_opt_str(data, "power_mode"),
             battery_level=_percent(data, "battery_level"),
+            battery_updated_at=_opt_datetime(data, "battery_updated_at"),
         )
 
 
@@ -213,6 +217,11 @@ class Button:
         base_id: The Base the button is linked to, or None for an unlinked button.
         serial: The button's serial on its Base, or None.
         audio_id: The button's sound (aud_...), or None.
+        battery_level: Battery charge in percent as reported through its Base, snapped
+            like Base.battery_level, or None when unknown: an unlinked button, one not
+            pressed since FluentPet started reporting it, or one whose battery is empty
+            (FluentPet reports an empty button battery as None, not 0).
+        battery_updated_at: When FluentPet received the latest battery reading, or None.
     """
 
     id: str
@@ -221,6 +230,8 @@ class Button:
     base_id: str | None
     serial: str | None
     audio_id: str | None
+    battery_level: int | None = None
+    battery_updated_at: datetime | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
@@ -232,6 +243,8 @@ class Button:
             base_id=_opt_str(data, "base_id"),
             serial=_opt_str(data, "serial"),
             audio_id=_opt_str(data, "audio_id"),
+            battery_level=_percent(data, "battery_level"),
+            battery_updated_at=_opt_datetime(data, "battery_updated_at"),
         )
 
 

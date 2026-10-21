@@ -1,6 +1,7 @@
 """Tests for the FluentPet Connect webhook."""
 
 import copy
+from dataclasses import replace
 from datetime import timedelta
 import json
 import time
@@ -626,6 +627,51 @@ async def test_lifecycle_delivery_refreshes(
     assert await _post(hass_client_no_auth, body, headers) == 200
     await hass.async_block_till_done()
     assert mock_client.async_get_buttons.await_count == 2
+
+
+@pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize(
+    ("fixture", "event_type", "entity_id", "expected"),
+    [
+        ("base_updated", "base.updated", "sensor.test_base_battery", "25"),
+        ("button_updated", "button.updated", "sensor.outside_battery", "25"),
+    ],
+)
+async def test_battery_delivery_updates_sensor(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    fixture: str,
+    event_type: str,
+    entity_id: str,
+    expected: str,
+) -> None:
+    """A delivered battery change in push mode updates the sensor right away.
+
+    The delivery reads the resources once, without waiting for the safety poll.
+    """
+    await setup_integration(hass, registered_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert registered_entry.runtime_data.coordinator.push_active
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=25, power_mode="battery"),
+        second,
+    ]
+    outside, *rest = mock_client.async_get_buttons.return_value
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, battery_level=25),
+        *rest,
+    ]
+    buttons_read = mock_client.async_get_buttons.await_count
+    body = _body(fixture)
+    headers = signed_headers(body, event_type=event_type)
+    assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert mock_client.async_get_buttons.await_count == buttons_read + 1
+    assert hass.states.get(entity_id).state == expected
 
 
 @pytest.mark.usefixtures("external_url")

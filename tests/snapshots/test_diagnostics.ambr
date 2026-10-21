@@ -6,6 +6,7 @@
       'bases': dict({
         'base_testbaseoneaaaaaaaaaaaaaaa': dict({
           'battery_level': 100,
+          'battery_updated_at': '2026-10-17T11:30:00+00:00',
           'connected': True,
           'fw_version': '2.4.20260901',
           'id': 'base_testbaseoneaaaaaaaaaaaaaaa',
@@ -16,7 +17,8 @@
           'serial': '**REDACTED**',
         }),
         'base_testbasetwoaaaaaaaaaaaaaaa': dict({
-          'battery_level': 62,
+          'battery_level': 50,
+          'battery_updated_at': '2026-10-17T11:40:00+00:00',
           'connected': False,
           'fw_version': None,
           'id': 'base_testbasetwoaaaaaaaaaaaaaaa',
@@ -31,6 +33,8 @@
         'btn_testbuttonoutsideaaaaaaaaa': dict({
           'audio_id': '**REDACTED**',
           'base_id': 'base_testbaseoneaaaaaaaaaaaaaaa',
+          'battery_level': 75,
+          'battery_updated_at': '2026-10-17T11:50:00+00:00',
           'id': 'btn_testbuttonoutsideaaaaaaaaa',
           'name': '**REDACTED**',
           'normalized_word': '**REDACTED**',
@@ -39,6 +43,8 @@
         'btn_testbuttonplayaaaaaaaaaaaa': dict({
           'audio_id': None,
           'base_id': 'base_testbaseoneaaaaaaaaaaaaaaa',
+          'battery_level': None,
+          'battery_updated_at': None,
           'id': 'btn_testbuttonplayaaaaaaaaaaaa',
           'name': '**REDACTED**',
           'normalized_word': '**REDACTED**',
@@ -47,6 +53,8 @@
         'btn_testbuttonwalkaaaaaaaaaaaa': dict({
           'audio_id': None,
           'base_id': None,
+          'battery_level': None,
+          'battery_updated_at': None,
           'id': 'btn_testbuttonwalkaaaaaaaaaaaa',
           'name': '**REDACTED**',
           'normalized_word': '**REDACTED**',

@@ -15,7 +15,8 @@
       "normalized_word": "outside",
       "audio_id": "aud_testaudiooutsideaaaaaaaaaa",
       "origin": "connect",
-      "type": "connect"
+      "type": "connect",
+      "battery_level": 50
     },
     "reason": "updated",
     "changes": {
@@ -30,6 +31,10 @@
       "audio_id": [
         null,
         "aud_testaudiooutsideaaaaaaaaaa"
+      ],
+      "battery_level": [
+        75,
+        50
       ]
     }
   }

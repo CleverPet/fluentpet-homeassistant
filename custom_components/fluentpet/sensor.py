@@ -1,6 +1,7 @@
 """Sensors of the FluentPet Connect integration.
 
-The last interaction of the household, and when each Base was last seen.
+The last interaction of the household, when each Base was last seen, and the
+battery level of each Base and linked button.
 """
 
 from datetime import datetime
@@ -11,16 +12,19 @@ from homeassistant.components.sensor import (
     RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
+    SensorStateClass,
 )
+from homeassistant.const import PERCENTAGE, EntityCategory, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import STATE_MAX_LENGTH, signal_interaction
+from .const import DOMAIN, STATE_MAX_LENGTH, signal_interaction
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
 from .entity import FluentPetCoordinatorEntity, FluentPetPushEntity, device_info
-from .fluentpet_api import InteractionUpdatedData
+from .fluentpet_api import Base, Button, InteractionUpdatedData
 
 PARALLEL_UPDATES = 0
 
@@ -30,7 +34,6 @@ ATTR_OCCURRED_AT = "occurred_at"
 ATTR_PRESSED_BY = "pressed_by"
 ATTR_INTERACTION_ID = "interaction_id"
 ATTR_POWER_MODE = "power_mode"
-ATTR_BATTERY_LEVEL = "battery_level"
 
 
 async def async_setup_entry(
@@ -38,27 +41,61 @@ async def async_setup_entry(
     entry: FluentPetConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the last interaction sensor and a last seen sensor per Base.
+    """Set up the last interaction sensor and the sensors of Bases and buttons.
 
-    Bases added later get their sensor at the refresh that returns them.
+    Each Base gets a last seen and a battery sensor, each button linked to a Base
+    a battery sensor. Bases added later, and buttons linked later, get theirs at
+    the refresh that returns them; a button that is unlinked loses its battery
+    sensor.
     """
     coordinator = entry.runtime_data.coordinator
     async_add_entities([FluentPetLastInteractionSensor(coordinator)])
-    known: set[str] = set()
+    known_bases: set[str] = set()
+    known_buttons: set[str] = set()
+    entity_registry = er.async_get(hass)
 
     @callback
     def _async_add_new() -> None:
-        # Forget Bases that left the household, so their sensor is built again
-        # when they return; a Base kept through an incomplete refresh, or whose
+        # Forget ids that left the household, so their sensors are built again
+        # when they return; an id kept through an incomplete refresh, or whose
         # sensor is disabled, stays known and is not built again on every update.
-        known.intersection_update(coordinator.known_base_ids)
-        new = set(coordinator.data.bases) - known
-        if not new:
+        known_bases.intersection_update(coordinator.known_base_ids)
+        known_buttons.intersection_update(coordinator.known_button_ids)
+        data = coordinator.data
+        # A button the refresh returned unlinked has no battery: remove its
+        # sensor and forget it, so linking it again builds the sensor again. A
+        # button missing from an incomplete refresh keeps its sensor.
+        unlinked = {
+            button_id
+            for button_id in known_buttons
+            if (button := data.buttons.get(button_id)) is not None
+            and button.base_id is None
+        }
+        known_buttons.difference_update(unlinked)
+        for button_id in unlinked:
+            if entity_id := entity_registry.async_get_entity_id(
+                Platform.SENSOR, DOMAIN, f"{button_id}_battery"
+            ):
+                entity_registry.async_remove(entity_id)
+        new_bases = set(data.bases) - known_bases
+        new_buttons = {
+            button_id
+            for button_id, button in data.buttons.items()
+            if button.base_id is not None
+        } - known_buttons
+        if not new_bases and not new_buttons:
             return
-        known.update(new)
-        async_add_entities(
-            FluentPetBaseLastSeenSensor(coordinator, base_id) for base_id in new
+        known_bases.update(new_bases)
+        known_buttons.update(new_buttons)
+        entities: list[SensorEntity] = []
+        for base_id in new_bases:
+            entities.append(FluentPetBaseLastSeenSensor(coordinator, base_id))
+            entities.append(FluentPetBaseBatterySensor(coordinator, base_id))
+        entities.extend(
+            FluentPetButtonBatterySensor(coordinator, button_id)
+            for button_id in new_buttons
         )
+        async_add_entities(entities)
 
     _async_add_new()
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new))
@@ -163,11 +200,10 @@ class FluentPetLastInteractionSensor(FluentPetPushEntity, RestoreSensor):
 
 
 class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
-    """When FluentPet last heard from a Base, with its power mode and battery level.
+    """When FluentPet last heard from a Base, with its power mode.
 
-    The power mode and battery level are recorded with the state: they change
-    rarely (plugging in or out) or slowly (the charge), and their history is what
-    shows when a Base ran on battery.
+    The power mode is recorded with the state: it changes rarely (plugging in or
+    out), and its history is what shows when a Base ran on battery.
     """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -195,9 +231,76 @@ class FluentPetBaseLastSeenSensor(FluentPetCoordinatorEntity, SensorEntity):
     @property
     @override
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the power mode and battery level of the Base."""
-        base = self.coordinator.data.bases[self.base_id]
-        return {
-            ATTR_POWER_MODE: base.power_mode,
-            ATTR_BATTERY_LEVEL: base.battery_level,
-        }
+        """Return the power mode of the Base."""
+        return {ATTR_POWER_MODE: self.coordinator.data.bases[self.base_id].power_mode}
+
+
+class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
+    """The battery level of a Base or button, in percent.
+
+    FluentPet reports the level in the steps of its app (100, 75, 50, 25 and 0).
+    Unavailable while refreshes fail, the device is not returned, or FluentPet
+    reports no level.
+    """
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: FluentPetCoordinator, device_id: str) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self.device_id = device_id
+        self._attr_unique_id = f"{device_id}_battery"
+        self._attr_device_info = device_info(device_id)
+
+    @property
+    def device(self) -> Base | Button | None:
+        """Return the Base or button of the last refresh, or None."""
+        raise NotImplementedError
+
+    @property
+    @override
+    def available(self) -> bool:
+        """Return whether the last refresh succeeded and returned a level."""
+        return (
+            super().available
+            and (device := self.device) is not None
+            and device.battery_level is not None
+        )
+
+    @property
+    @override
+    def native_value(self) -> int | None:
+        """Return the battery level."""
+        device = self.device
+        return device.battery_level if device is not None else None
+
+
+class FluentPetBaseBatterySensor(FluentPetBatterySensor):
+    """The battery level of a Base.
+
+    Its power mode is an attribute of the last seen sensor, which stays available
+    while the Base reports no level (as it may while it charges).
+    """
+
+    @property
+    @override
+    def device(self) -> Base | None:
+        """Return the Base of the last refresh, or None."""
+        return self.coordinator.data.bases.get(self.device_id)
+
+
+class FluentPetButtonBatterySensor(FluentPetBatterySensor):
+    """The battery level of a button, as its Base reports it.
+
+    FluentPet reports no level for a button that has not been pressed since it
+    started reporting button levels, or whose battery is empty.
+    """
+
+    @property
+    @override
+    def device(self) -> Button | None:
+        """Return the button of the last refresh, or None."""
+        return self.coordinator.data.buttons.get(self.device_id)

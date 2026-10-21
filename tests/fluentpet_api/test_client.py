@@ -142,23 +142,28 @@ async def test_get_bases(
     assert bases[0].fw_version == "2.4.20260901"
     assert bases[0].power_mode == "plugged_in"
     assert bases[0].battery_level == 100
+    assert bases[0].battery_updated_at == datetime(2026, 10, 17, 11, 30, tzinfo=UTC)
     assert bases[1].name is None
     assert bases[1].connected is False
     assert bases[1].last_online_at == datetime(2026, 10, 17, 11, 45, tzinfo=UTC)
     assert bases[1].power_mode == "battery"
-    assert bases[1].battery_level == 62
+    assert bases[1].battery_level == 50
 
 
 async def test_get_buttons(
     client: FluentPetClient, mocker_aiohttp: AiohttpClientMocker
 ) -> None:
-    """Buttons are parsed, including unlinked ones."""
+    """Buttons are parsed with their battery level, including unlinked ones."""
     mocker_aiohttp.get(f"{API}/{HH}/buttons", json=load_json_fixture("buttons.json"))
     buttons = await client.async_get_buttons(HH)
     assert buttons[0].name == "Outside"
     assert buttons[0].normalized_word == "outside"
     assert buttons[0].base_id == "base_testbaseoneaaaaaaaaaaaaaaa"
     assert buttons[0].audio_id == "aud_testaudiooutsideaaaaaaaaaa"
+    assert buttons[0].battery_level == 75
+    assert buttons[0].battery_updated_at == datetime(2026, 10, 17, 11, 50, tzinfo=UTC)
+    assert buttons[1].battery_level is None
+    assert buttons[1].battery_updated_at is None
     assert buttons[2].base_id is None
     assert buttons[2].serial is None
 

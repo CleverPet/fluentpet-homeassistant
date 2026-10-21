@@ -1,4 +1,4 @@
-"""Tests for the FluentPet Connect last interaction and last seen sensors."""
+"""Tests for the FluentPet Connect last interaction, last seen and battery sensors."""
 
 from dataclasses import replace
 from datetime import timedelta
@@ -19,15 +19,23 @@ from custom_components.fluentpet.const import signal_interaction
 from custom_components.fluentpet.fluentpet_api import (
     Event,
     FluentPetConnectionError,
+    FluentPetParseError,
     InteractionUpdatedData,
 )
 from custom_components.fluentpet.sensor import FluentPetBaseLastSeenSensor
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN, Platform
+from homeassistant.const import (
+    PERCENTAGE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    EntityCategory,
+    Platform,
+)
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .common import load_json_fixture, setup_integration
+from .conftest import buttons
 
 SENSOR_ENTITY = "sensor.test_household_last_interaction"
 
@@ -229,32 +237,31 @@ async def test_last_seen(
     entity_registry: er.EntityRegistry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Each Base has a last seen timestamp with its power mode and battery level."""
+    """Each Base has a last seen timestamp with its power mode."""
     await setup_integration(hass, mock_config_entry)
     plugged_in = hass.states.get(PLUGGED_IN)
     assert plugged_in.state == "2026-10-17T12:00:00+00:00"
     assert plugged_in.attributes["device_class"] == "timestamp"
     assert plugged_in.attributes["power_mode"] == "plugged_in"
-    assert plugged_in.attributes["battery_level"] == 100
+    assert "battery_level" not in plugged_in.attributes
     on_battery = hass.states.get(ON_BATTERY)
     assert on_battery.state == "2026-10-17T11:45:00+00:00"
     assert on_battery.attributes["power_mode"] == "battery"
-    assert on_battery.attributes["battery_level"] == 62
+    assert "battery_level" not in on_battery.attributes
     entry = entity_registry.async_get(PLUGGED_IN)
     assert entry.unique_id == "base_testbaseoneaaaaaaaaaaaaaaa_last_seen"
     assert entry.entity_category is None
 
     first, second = mock_client.async_get_bases.return_value
     mock_client.async_get_bases.return_value = [
-        replace(first, last_online_at=None, power_mode=None, battery_level=None),
-        replace(second, battery_level=61),
+        replace(first, last_online_at=None, power_mode=None),
+        replace(second, power_mode="plugged_in"),
     ]
     await _refresh(hass, freezer)
     plugged_in = hass.states.get(PLUGGED_IN)
     assert plugged_in.state == STATE_UNKNOWN
     assert plugged_in.attributes["power_mode"] is None
-    assert plugged_in.attributes["battery_level"] is None
-    assert hass.states.get(ON_BATTERY).attributes["battery_level"] == 61
+    assert hass.states.get(ON_BATTERY).attributes["power_mode"] == "plugged_in"
 
 
 async def test_last_seen_unavailable_while_refresh_fails(
@@ -276,9 +283,270 @@ async def test_last_seen_unavailable_while_refresh_fails(
 async def test_last_seen_attributes_recorded(
     hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
 ) -> None:
-    """The power mode and battery level are reported and kept in the recorder."""
+    """The power mode is reported and kept in the recorder."""
     await setup_integration(hass, mock_config_entry)
-    attributes = hass.states.get(PLUGGED_IN).attributes
-    assert {"power_mode", "battery_level"} <= set(attributes)
+    assert "power_mode" in hass.states.get(PLUGGED_IN).attributes
     unrecorded = FluentPetBaseLastSeenSensor._unrecorded_attributes  # noqa: SLF001
-    assert not unrecorded & {"power_mode", "battery_level"}
+    assert "power_mode" not in unrecorded
+
+
+BASE_BATTERY = "sensor.test_base_battery"
+OTHER_BASE_BATTERY = "sensor.base_testserial0002_battery"
+BUTTON_BATTERY = "sensor.outside_battery"
+UNREPORTED_BUTTON_BATTERY = "sensor.play_battery"
+
+
+async def test_base_battery(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Each Base has a diagnostic battery sensor without attributes of its own."""
+    await setup_integration(hass, mock_config_entry)
+    state = hass.states.get(BASE_BATTERY)
+    assert state.state == "100"
+    assert state.attributes["device_class"] == "battery"
+    assert state.attributes["unit_of_measurement"] == PERCENTAGE
+    assert state.attributes["state_class"] == "measurement"
+    assert "power_mode" not in state.attributes
+    assert state.attributes["friendly_name"] == "Test Base Battery"
+    assert hass.states.get(OTHER_BASE_BATTERY).state == "50"
+    entry = entity_registry.async_get(BASE_BATTERY)
+    assert entry.unique_id == "base_testbaseoneaaaaaaaaaaaaaaa_battery"
+    assert entry.entity_category is EntityCategory.DIAGNOSTIC
+
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=None),
+        replace(second, battery_level=25),
+    ]
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(OTHER_BASE_BATTERY).state == "25"
+
+
+async def test_button_battery(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Each linked button has a battery sensor, unavailable without a level."""
+    await setup_integration(hass, mock_config_entry)
+    state = hass.states.get(BUTTON_BATTERY)
+    assert state.state == "75"
+    assert state.attributes["device_class"] == "battery"
+    assert state.attributes["unit_of_measurement"] == PERCENTAGE
+    assert "power_mode" not in state.attributes
+    entry = entity_registry.async_get(BUTTON_BATTERY)
+    assert entry.unique_id == "btn_testbuttonoutsideaaaaaaaaa_battery"
+    assert entry.entity_category is EntityCategory.DIAGNOSTIC
+    # Not pressed since FluentPet started reporting button levels.
+    assert hass.states.get(UNREPORTED_BUTTON_BATTERY).state == STATE_UNAVAILABLE
+    # An unlinked button has no battery sensor.
+    assert hass.states.get("sensor.walk_battery") is None
+
+    outside, play, walk = buttons()
+    mock_client.async_get_buttons.return_value = [
+        outside,
+        replace(play, battery_level=25),
+        replace(walk, base_id="base_testbaseoneaaaaaaaaaaaaaaa", battery_level=100),
+    ]
+    await _refresh(hass, freezer)
+    assert hass.states.get(UNREPORTED_BUTTON_BATTERY).state == "25"
+    assert hass.states.get("sensor.walk_battery").state == "100"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "entity_id", "expected"),
+    [
+        ("base_updated", BASE_BATTERY, "25"),
+        ("button_updated", BUTTON_BATTERY, "25"),
+    ],
+)
+async def test_processed_battery_event_refreshes(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    fixture: str,
+    entity_id: str,
+    expected: str,
+) -> None:
+    """A processed base.updated or button.updated updates the battery sensor.
+
+    This is the path of a pushed (webhook) event: processing it requests a
+    refresh right away, without waiting for the refresh interval. The feed path
+    is covered in test_push.
+    """
+    await setup_integration(hass, mock_config_entry)
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=25, power_mode="battery"),
+        second,
+    ]
+    outside, *rest = mock_client.async_get_buttons.return_value
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, battery_level=25),
+        *rest,
+    ]
+    event = Event.from_dict(load_json_fixture(f"events/{fixture}.json"))
+    mock_config_entry.runtime_data.coordinator.processor.async_process(event)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == expected
+
+
+async def test_charging_base(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A charging Base reports no level; the last seen sensor has the power mode."""
+    await setup_integration(hass, mock_config_entry)
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=None, power_mode="plugged_in"),
+        second,
+    ]
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(PLUGGED_IN).attributes["power_mode"] == "plugged_in"
+
+
+async def test_battery_unavailable_while_refresh_fails(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The battery sensors follow the refresh, not the webhook."""
+    await setup_integration(hass, mock_config_entry)
+    mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(BUTTON_BATTERY).state == STATE_UNAVAILABLE
+    mock_client.async_get_bases.side_effect = None
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == "100"
+    assert hass.states.get(BUTTON_BATTERY).state == "75"
+
+
+async def test_unlinked_button_loses_battery_sensor(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Unlinking a button removes its battery sensor; linking it again restores it."""
+    await setup_integration(hass, mock_config_entry)
+    assert entity_registry.async_get(BUTTON_BATTERY) is not None
+    outside, *rest = buttons()
+
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, base_id=None, battery_level=None),
+        *rest,
+    ]
+    await _refresh(hass, freezer)
+    assert entity_registry.async_get(BUTTON_BATTERY) is None
+    assert hass.states.get(BUTTON_BATTERY) is None
+    # The button and its press entity stay.
+    assert hass.states.get("event.outside_press") is not None
+
+    mock_client.async_get_buttons.return_value = [outside, *rest]
+    await _refresh(hass, freezer)
+    assert entity_registry.async_get(BUTTON_BATTERY) is not None
+    assert hass.states.get(BUTTON_BATTERY).state == "75"
+
+
+async def test_disabled_button_battery_sensor_relinked(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A battery sensor the user disabled stays disabled after unlink and relink."""
+    await setup_integration(hass, mock_config_entry)
+    entity_registry.async_update_entity(
+        BUTTON_BATTERY, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+    outside, *rest = buttons()
+
+    mock_client.async_get_buttons.return_value = [
+        replace(outside, base_id=None, battery_level=None),
+        *rest,
+    ]
+    await _refresh(hass, freezer)
+    assert entity_registry.async_get(BUTTON_BATTERY) is None
+
+    mock_client.async_get_buttons.return_value = [outside, *rest]
+    await _refresh(hass, freezer)
+    entry = entity_registry.async_get(BUTTON_BATTERY)
+    assert entry is not None
+    assert entry.unique_id == "btn_testbuttonoutsideaaaaaaaaa_battery"
+    assert entry.disabled_by is er.RegistryEntryDisabler.USER
+    assert hass.states.get(BUTTON_BATTERY) is None
+
+
+async def test_removed_button_battery_sensor_rebuilt(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A button that leaves the household and returns gets its sensor again."""
+    await setup_integration(hass, mock_config_entry)
+    outside, *rest = buttons()
+    mock_client.async_get_buttons.return_value = rest
+    await _refresh(hass, freezer)
+    assert entity_registry.async_get(BUTTON_BATTERY) is None
+    assert hass.states.get(BUTTON_BATTERY) is None
+
+    mock_client.async_get_buttons.return_value = [outside, *rest]
+    await _refresh(hass, freezer)
+    assert entity_registry.async_get(BUTTON_BATTERY) is not None
+    assert hass.states.get(BUTTON_BATTERY).state == "75"
+
+
+async def test_battery_sensor_incomplete_refresh(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Base or button skipped as malformed leaves its sensor unavailable."""
+    await setup_integration(hass, mock_config_entry)
+    _, second = mock_client.async_get_bases.return_value
+    outside, *rest = buttons()
+
+    def _skipping(result: list[Any]) -> Any:
+        def _get(household_id: str, *, on_invalid: Any = None) -> list[Any]:
+            on_invalid(FluentPetParseError("malformed"))
+            return result
+
+        return _get
+
+    mock_client.async_get_bases.side_effect = _skipping([second])
+    mock_client.async_get_buttons.side_effect = _skipping(rest)
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == STATE_UNAVAILABLE
+    assert hass.states.get(BUTTON_BATTERY).state == STATE_UNAVAILABLE
+    assert entity_registry.async_get(BASE_BATTERY) is not None
+    assert entity_registry.async_get(BUTTON_BATTERY) is not None
+    assert "Traceback" not in caplog.text
+    assert "Error" not in caplog.text
+
+    mock_client.async_get_bases.side_effect = None
+    mock_client.async_get_buttons.side_effect = None
+    mock_client.async_get_buttons.return_value = [outside, *rest]
+    await _refresh(hass, freezer)
+    assert hass.states.get(BASE_BATTERY).state == "100"
+    assert hass.states.get(BUTTON_BATTERY).state == "75"

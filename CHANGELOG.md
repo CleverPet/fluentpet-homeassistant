@@ -21,8 +21,17 @@ All notable changes to this project are documented in this file.
 - Sensor platform: last interaction sensor per household, restored across
   restarts, with the same `pressed_by` attribute for the learner or teacher of
   the interaction.
-- Sensor platform: last seen sensor per Base (timestamp), with the Base's
-  power mode (`plugged_in` or `battery`) and battery level as attributes.
+- Sensor platform: last seen sensor per Base (timestamp, the time of the
+  Base's last report), with the Base's power mode (`plugged_in` or `battery`)
+  as an attribute.
+- Sensor platform: battery sensor per Base and per Button linked to a Base
+  (device class battery, diagnostic), in the steps the FluentPet app shows
+  (100, 75, 50, 25, 0). Unavailable while FluentPet reports no level; a
+  Button reports its level from its first press after FluentPet started
+  reporting Button levels. A Button's sensor is removed when it is unlinked
+  from its Base and comes back when it is linked again. An empty Button
+  battery reads as no level. A level change pushed as a `base.updated` or
+  `button.updated` event updates the sensor right away.
 - Push through a FluentPet household webhook, delivered to a Home Assistant
   Cloud cloudhook or the external https URL, with HMAC signature verification,
   a 5 minute timestamp window and deduplication.
@@ -88,6 +97,8 @@ All notable changes to this project are documented in this file.
 - The household list in setup offers only households the account administers
   and that are not configured yet.
 - Diagnostics also redact the normalized words and audio ids of Buttons.
+- Diagnostics include the battery level and battery reading time of Bases
+  and Buttons.
 - An active webhook is checked again every 5 minutes, so one FluentPet
   disabled or deleted while Home Assistant runs is noticed and handled.
 - An inactive Home Assistant Cloud subscription moves the webhook off the

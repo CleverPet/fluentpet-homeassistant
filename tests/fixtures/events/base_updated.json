@@ -13,7 +13,9 @@
       "id": "base_testbaseoneaaaaaaaaaaaaaaa",
       "serial": "TESTSERIAL0001",
       "name": "Test Base",
-      "fw_version": "2.4.20260901"
+      "fw_version": "2.4.20260901",
+      "battery_level": 75,
+      "power_mode": "battery"
     },
     "default_learner": {
       "id": "psh_testlearneraaaaaaaaaaaaaaa",
@@ -33,6 +35,14 @@
       "group_interactions_within_seconds": [
         10,
         15
+      ],
+      "battery_level": [
+        100,
+        75
+      ],
+      "power_mode": [
+        "plugged_in",
+        "battery"
       ]
     }
   }

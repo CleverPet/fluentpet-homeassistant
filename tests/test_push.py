@@ -26,7 +26,7 @@ from custom_components.fluentpet.fluentpet_api import (
 from custom_components.fluentpet.webhook import webhook_healthy
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
@@ -1096,3 +1096,68 @@ async def test_safety_poll_press_kept_until_entity_ready(
     state = hass.states.get("event.treat_press")
     assert state.state != STATE_UNKNOWN
     assert state.attributes["replayed"] is False
+
+
+# Battery levels
+
+
+BASE_BATTERY_ENTITY = "sensor.test_base_battery"
+BUTTON_BATTERY_ENTITY = "sensor.outside_battery"
+
+
+async def test_safety_poll_keeps_button_battery(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A safety poll updates Base levels; buttons change only when read.
+
+    The safety poll does not read the buttons, so an unlinked button keeps its
+    battery sensor until a button event reads them.
+    """
+    await _setup_push(hass, freezer, mock_client, mock_config_entry)
+    first, second = bases()
+    outside, *rest = buttons()
+    mock_client.async_get_bases.return_value = [
+        dataclasses.replace(first, battery_level=25),
+        second,
+    ]
+    mock_client.async_get_buttons.return_value = [
+        dataclasses.replace(outside, base_id=None, battery_level=None),
+        *rest,
+    ]
+    await _poll(hass, freezer)
+    _assert_safety_poll(mock_client)
+    mock_client.async_get_buttons.assert_not_awaited()
+    assert hass.states.get(BASE_BATTERY_ENTITY).state == "25"
+    assert entity_registry.async_get(BUTTON_BATTERY_ENTITY) is not None
+    assert hass.states.get(BUTTON_BATTERY_ENTITY).state == "75"
+
+    coordinator = mock_config_entry.runtime_data.coordinator
+    coordinator.processor.async_process(_event("button_updated"))
+    await hass.async_block_till_done()
+    mock_client.async_get_buttons.assert_awaited_once()
+    assert entity_registry.async_get(BUTTON_BATTERY_ENTITY) is None
+
+
+async def test_feed_button_updated_updates_battery_in_safety_poll(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A button.updated the webhook missed reads the buttons in that poll."""
+    await _setup_push(hass, freezer, mock_client, mock_config_entry)
+    outside, *rest = buttons()
+    mock_client.async_get_buttons.return_value = [
+        dataclasses.replace(outside, battery_level=25),
+        *rest,
+    ]
+    mock_client.async_get_events.side_effect = [
+        EventPage((_event("button_updated"),), NEXT_CURSOR)
+    ]
+    await _poll(hass, freezer)
+    assert mock_client.async_get_buttons.await_count == 1
+    assert hass.states.get(BUTTON_BATTERY_ENTITY).state == "25"

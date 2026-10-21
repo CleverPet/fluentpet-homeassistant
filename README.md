@@ -192,9 +192,10 @@ next refresh; see [Bases and Buttons](#bases-and-buttons).
 
 No step is needed. The integration ships the public client id of the FluentPet
 OAuth client for Home Assistant and adds it as an application credential named
-**FluentPet** when you start adding the integration, and on each start of
-Home Assistant once the integration is set up. An existing credential is kept.
-The client is a public client that signs in with PKCE and has no secret.
+**FluentPet** when you start adding the integration and no FluentPet
+application credential exists yet, and on each start of Home Assistant once
+the integration is set up. An existing credential is kept. The client is a
+public client that signs in with PKCE and has no secret.
 
 ### Add the integration
 
@@ -669,8 +670,8 @@ account of the household admin. Only the admin receives button presses and
 manages webhooks.
 
 **Setup says the integration is not configured, or asks for an application
-credential.** Start adding the integration again, so the integration adds the
-FluentPet application credential again, as described in
+credential.** Start adding the integration again; it adds the FluentPet
+application credential, as described in
 [Application credential](#application-credential). Once the integration is set
 up, a restart of Home Assistant adds it too.
 

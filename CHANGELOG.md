@@ -116,7 +116,8 @@ All notable changes to this project are documented in this file.
   so the feed fires them once after a restart.
 - Adding the integration on a fresh install no longer stops with a missing
   application credential: adding the integration and reauthentication add
-  the FluentPet application credential when it is missing, without a restart.
+  the FluentPet application credential when no application credential exists,
+  without a restart.
 - Reauthentication signs in again with the application credential of the
   entry instead of asking to pick one, and the credential picker shows each
   credential by its name.

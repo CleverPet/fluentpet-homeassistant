@@ -570,6 +570,36 @@ async def test_reauth_keeps_implementation(
     assert entry.data["token"]["access_token"] == "mock-new-access-token"
 
 
+@pytest.mark.fresh_install
+@pytest.mark.usefixtures("mock_setup_entry", "public_client_id")
+async def test_reauth_stale_implementation(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_client: AsyncMock,
+    entry_data: dict[str, Any],
+) -> None:
+    """Reauthentication of an entry whose credential was removed uses another one."""
+    await _import_user_credential(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        unique_id=HOUSEHOLD_ID,
+        data={**entry_data, "auth_implementation": f"{DOMAIN}_old"},
+    )
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert URL(result["url"]).query["client_id"] == USER_CLIENT_ID
+    result = await _authorize(hass, hass_client_no_auth, aioclient_mock, result)
+    await hass.async_block_till_done()
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["auth_implementation"] == USER_AUTH_DOMAIN
+    assert entry.data["token"]["access_token"] == "mock-new-access-token"
+
+
 DEV_URL = "https://example.com/dev-api"
 
 

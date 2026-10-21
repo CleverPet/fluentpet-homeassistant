@@ -51,6 +51,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import OAuth2TokenRequestConnectionError
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import REQUEST_REFRESH_DEFAULT_COOLDOWN
 from homeassistant.util import dt as dt_util
 from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
 
@@ -701,7 +702,7 @@ async def test_power_mode_delivery_updates_sensors(
     shows the level again. Each delivery reads the Bases without waiting for the
     safety poll.
     """
-    plug = "binary_sensor.base_testserial0002_plugged_in"
+    plug = "binary_sensor.base_testserial0002_power"
     battery = "sensor.base_testserial0002_battery"
     await setup_integration(hass, registered_entry)
     await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
@@ -726,7 +727,7 @@ async def test_power_mode_delivery_updates_sensors(
     assert hass.states.get(battery).state == STATE_UNKNOWN
 
     # Past the cooldown of the requested refresh.
-    await _wait(hass, freezer, timedelta(seconds=11))
+    await _wait(hass, freezer, timedelta(seconds=REQUEST_REFRESH_DEFAULT_COOLDOWN + 1))
     mock_client.async_get_bases.return_value = [first, second]
     body = _base_updated_body("base_unplugged", reason)
     headers = signed_headers(

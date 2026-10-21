@@ -21,7 +21,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, POWER_MODE_PLUGGED_IN, STATE_MAX_LENGTH, signal_interaction
+from .const import DOMAIN, STATE_MAX_LENGTH, signal_interaction
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
 from .entity import FluentPetCoordinatorEntity, FluentPetPushEntity, device_info
 from .fluentpet_api import Base, Button, InteractionUpdatedData
@@ -265,9 +265,8 @@ class FluentPetBatterySensor(FluentPetCoordinatorEntity, SensorEntity):
 class FluentPetBaseBatterySensor(FluentPetBatterySensor):
     """The battery level of a Base.
 
-    Unknown while the Base runs plugged in (FluentPet then reports no level) or
-    reports no level; it stays available then, like the other sensors of the
-    Base.
+    Unknown while FluentPet reports no level, as it does while the Base runs
+    plugged in; it stays available then, like the other sensors of the Base.
     """
 
     @property
@@ -275,15 +274,6 @@ class FluentPetBaseBatterySensor(FluentPetBatterySensor):
     def device(self) -> Base | None:
         """Return the Base of the last refresh, or None."""
         return self.coordinator.data.bases.get(self.device_id)
-
-    @property
-    @override
-    def native_value(self) -> int | None:
-        """Return the battery level, or None while the Base runs plugged in."""
-        base = self.device
-        if base is None or base.power_mode == POWER_MODE_PLUGGED_IN:
-            return None
-        return base.battery_level
 
 
 class FluentPetButtonBatterySensor(FluentPetBatterySensor):

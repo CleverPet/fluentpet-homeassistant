@@ -69,7 +69,7 @@ Entities:
 | Press | `event`, device class `button` | Each Button | `event.outside_press` |
 | Last interaction | `sensor` | Household | `sensor.smith_home_last_interaction` |
 | Last seen | `sensor`, device class `timestamp` | Each Base | `sensor.kitchen_base_last_seen` |
-| Plugged in | `binary_sensor`, device class `plug` | Each Base | `binary_sensor.kitchen_base_plugged_in` |
+| Power | `binary_sensor`, device class `plug` | Each Base | `binary_sensor.kitchen_base_power` |
 | Battery | `sensor`, device class `battery`, diagnostic | Each Base | `sensor.kitchen_base_battery` |
 | Battery | `sensor`, device class `battery`, diagnostic | Each Button linked to a Base | `sensor.outside_battery` |
 
@@ -129,16 +129,17 @@ or unknown when FluentPet does not say. It is not an online or liveness
 signal: a Base reports only on activity (for example a press) or on its own
 schedule, so hours without a report are normal. The sensor is unavailable
 while refreshes from FluentPet fail. It has no attributes of its own; whether
-the Base runs plugged in is the [Plugged in sensor](#plugged-in-sensor).
+the Base runs plugged in is the [Power sensor](#power-sensor).
 
-### Plugged in sensor
+### Power sensor
 
-One per Base, a binary sensor with device class `plug`. The state is `on`
-while the Base runs plugged in (FluentPet reports a charging Base as plugged
-in) and `off` while it runs on battery, so its history shows when a Base ran
-on battery. It is unknown while FluentPet has not reported a power mode for
-the Base, or reports one the integration does not know. The sensor is unavailable while refreshes from FluentPet fail.
-Buttons have no plugged in sensor.
+One per Base, a binary sensor named **Power** with device class `plug`. The
+state is `on` (shown as Plugged in) while the Base runs plugged in (FluentPet
+reports a charging Base as plugged in) and `off` (shown as Unplugged) while it
+runs on battery, so its history shows when a Base ran on battery. It is
+unknown while FluentPet has not reported a power mode for the Base, or
+reports one the integration does not know. The sensor is unavailable while
+refreshes from FluentPet fail. Buttons have no power sensor.
 
 When a Base is plugged in or unplugged, FluentPet sends a `base.updated`
 event, which updates the sensor like a battery level change; see
@@ -153,10 +154,12 @@ the same steps the FluentPet app shows, so the sensor changes in steps of 25.
 
 A battery sensor is unavailable while refreshes from FluentPet fail.
 
-A Base battery sensor is unknown while the Base runs plugged in, because
-FluentPet reports no level then, and while a Base on battery reports no
-level; it stays available. Once the Base is unplugged, it shows the level
-again.
+A Base battery sensor shows the level FluentPet reports, whatever the power
+mode. It is unknown, and stays available, whenever FluentPet reports no level
+for the Base: while it runs plugged in (FluentPet reports no level then),
+before it has reported a level, and while it has never reported a power mode
+and has no level. It shows the level again once FluentPet reports one, for
+example after the Base is unplugged.
 
 A Button battery sensor is also unavailable while FluentPet reports no
 battery level for the Button. A Button reports its level through its Base
@@ -169,7 +172,7 @@ the sensor is removed when the Button is unlinked and comes back when it is
 linked again.
 
 The battery sensors have no attributes of their own. Whether a Base runs
-plugged in or on battery is its [Plugged in sensor](#plugged-in-sensor).
+plugged in or on battery is its [Power sensor](#power-sensor).
 
 When the battery level of a Base or Button moves to another step, FluentPet
 sends a `base.updated` or `button.updated` event. Delivered by the webhook,
@@ -514,7 +517,7 @@ Notifies once when the battery of the Base named **Kitchen Base** is at 25% or
 lower while it is not plugged in, and not again until the level rises above
 25% or the Base is plugged in. A Toggle helper remembers that the notification
 was sent; create it under **Settings > Devices & services > Helpers**, or in
-YAML as below. The plugged in check reads the Plugged in sensor; the battery
+YAML as below. The plugged in check reads the Power sensor; the battery
 sensor is unknown while the Base is plugged in, because FluentPet reports no
 level then. The levels are 100, 75, 50, 25 and 0, so `below: 26` means 25 or
 lower.
@@ -537,7 +540,7 @@ automation:
         entity_id: sensor.kitchen_base_battery
         above: 25
       - trigger: state
-        entity_id: binary_sensor.kitchen_base_plugged_in
+        entity_id: binary_sensor.kitchen_base_power
     actions:
       - choose:
           - conditions:
@@ -547,7 +550,7 @@ automation:
                     entity_id: sensor.kitchen_base_battery
                     above: 25
                   - condition: state
-                    entity_id: binary_sensor.kitchen_base_plugged_in
+                    entity_id: binary_sensor.kitchen_base_power
                     state: "on"
             sequence:
               - action: input_boolean.turn_off
@@ -653,9 +656,9 @@ false notifications.
   start, with their original `occurred_at` and `replayed` set to `true`. At
   most 5,000 events are read per refresh; a longer backlog continues at the
   next refresh.
-- While refreshes from FluentPet fail, the last seen, plugged in and battery
-  sensors are unavailable. The press entities and the last interaction sensor stay
-  available while the webhook is active; without the webhook they are
+- While refreshes from FluentPet fail, the last seen, power and battery
+  sensors are unavailable. The press entities and the last interaction sensor
+  stay available while the webhook is active; without the webhook they are
   unavailable too, and the presses and interactions read once refreshes work
   again fire after the entities are back. A press delivered by the webhook
   while its entity is unavailable is held (up to 100 per entity) and fires
@@ -724,9 +727,12 @@ a level can mean the battery is empty and needs replacing: FluentPet reports
 an empty Button battery as no level. Otherwise the last refresh from
 FluentPet failed; check the logs as above.
 
-**A Base battery sensor is unknown.** The Base runs plugged in, and FluentPet
-reports no level while it does; its Plugged in sensor is `on`. A Base on
-battery that has not reported a level yet is unknown too.
+**A Base battery sensor is unknown.** FluentPet reports no level for the
+Base. It reports none while the Base runs plugged in (its Power sensor is
+`on`), and a Base can also have no level for other reasons, for example one
+that has not reported a level yet or has never reported a power mode (its
+Power sensor is unknown). The sensor stays available and shows the level once
+FluentPet reports one.
 
 **A new Button has no entity.** New Buttons are added at the next refresh, or
 right away when FluentPet reports the change. Reload the integration to force

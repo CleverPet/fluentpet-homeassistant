@@ -23,14 +23,18 @@ All notable changes to this project are documented in this file.
   the interaction.
 - Sensor platform: last seen sensor per Base (timestamp, the time of the
   Base's last report), without attributes.
-- Binary sensor platform: plugged in sensor per Base (device class plug), on
-  while the Base runs plugged in, off on battery, unknown while FluentPet has
-  not reported a power mode. A `base.updated` event (reason
-  `battery_reported` or `power_mode_reported`) updates it right away.
+- Binary sensor platform: power sensor per Base (device class plug), on
+  (Plugged in) while the Base runs plugged in, off (Unplugged) on battery,
+  unknown while FluentPet has not reported a power mode or reports one the
+  integration does not know. A `base.updated` event (reason
+  `battery_reported` or `power_mode_reported`) delivered by the webhook
+  updates it right away; while polling, the change shows up at the next
+  refresh.
 - Sensor platform: battery sensor per Base and per Button linked to a Base
   (device class battery, diagnostic), in the steps the FluentPet app shows
   (100, 75, 50, 25, 0). A Base battery sensor is unknown, and stays
-  available, while the Base runs plugged in or reports no level. A Button
+  available, while FluentPet reports no level, as it does while the Base
+  runs plugged in. A Button
   battery sensor is unavailable while FluentPet reports no level; a
   Button reports its level from its first press after FluentPet started
   reporting Button levels. A Button's sensor is removed when it is unlinked

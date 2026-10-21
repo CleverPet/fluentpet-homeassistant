@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_entities[binary_sensor.base_testserial0002_plugged_in-entry]
+# name: test_entities[binary_sensor.base_testserial0002_power-entry]
   EntityRegistryEntrySnapshot({
     'aliases': list([
       None,
@@ -13,7 +13,7 @@
     'disabled_by': None,
     'domain': 'binary_sensor',
     'entity_category': None,
-    'entity_id': 'binary_sensor.base_testserial0002_plugged_in',
+    'entity_id': 'binary_sensor.base_testserial0002_power',
     'has_entity_name': True,
     'hidden_by': None,
     'icon': None,
@@ -21,36 +21,36 @@
     'labels': set({
     }),
     'name': None,
-    'object_id_base': 'Plugged in',
+    'object_id_base': 'Power',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.PLUG: 'plug'>,
     'original_icon': None,
-    'original_name': 'Plugged in',
+    'original_name': 'Power',
     'platform': 'fluentpet',
     'previous_unique_id': None,
     'suggested_object_id': None,
     'supported_features': 0,
-    'translation_key': 'plugged_in',
-    'unique_id': 'base_testbasetwoaaaaaaaaaaaaaaa_plugged_in',
+    'translation_key': 'power',
+    'unique_id': 'base_testbasetwoaaaaaaaaaaaaaaa_power',
     'unit_of_measurement': None,
   })
 # ---
-# name: test_entities[binary_sensor.base_testserial0002_plugged_in-state]
+# name: test_entities[binary_sensor.base_testserial0002_power-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
       <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'plug',
-      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Base TESTSERIAL0002 Plugged in',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Base TESTSERIAL0002 Power',
     }),
     'context': <ANY>,
-    'entity_id': 'binary_sensor.base_testserial0002_plugged_in',
+    'entity_id': 'binary_sensor.base_testserial0002_power',
     'last_changed': <ANY>,
     'last_reported': <ANY>,
     'last_updated': <ANY>,
     'state': 'off',
   })
 # ---
-# name: test_entities[binary_sensor.test_base_plugged_in-entry]
+# name: test_entities[binary_sensor.test_base_power-entry]
   EntityRegistryEntrySnapshot({
     'aliases': list([
       None,
@@ -64,7 +64,7 @@
     'disabled_by': None,
     'domain': 'binary_sensor',
     'entity_category': None,
-    'entity_id': 'binary_sensor.test_base_plugged_in',
+    'entity_id': 'binary_sensor.test_base_power',
     'has_entity_name': True,
     'hidden_by': None,
     'icon': None,
@@ -72,29 +72,29 @@
     'labels': set({
     }),
     'name': None,
-    'object_id_base': 'Plugged in',
+    'object_id_base': 'Power',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.PLUG: 'plug'>,
     'original_icon': None,
-    'original_name': 'Plugged in',
+    'original_name': 'Power',
     'platform': 'fluentpet',
     'previous_unique_id': None,
     'suggested_object_id': None,
     'supported_features': 0,
-    'translation_key': 'plugged_in',
-    'unique_id': 'base_testbaseoneaaaaaaaaaaaaaaa_plugged_in',
+    'translation_key': 'power',
+    'unique_id': 'base_testbaseoneaaaaaaaaaaaaaaa_power',
     'unit_of_measurement': None,
   })
 # ---
-# name: test_entities[binary_sensor.test_base_plugged_in-state]
+# name: test_entities[binary_sensor.test_base_power-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
       <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'plug',
-      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Base Plugged in',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Base Power',
     }),
     'context': <ANY>,
-    'entity_id': 'binary_sensor.test_base_plugged_in',
+    'entity_id': 'binary_sensor.test_base_power',
     'last_changed': <ANY>,
     'last_reported': <ANY>,
     'last_updated': <ANY>,

@@ -297,11 +297,11 @@ async def test_base_battery(
 ) -> None:
     """Each Base has a diagnostic battery sensor without attributes of its own.
 
-    It is unknown, not unavailable, while the Base runs plugged in or reports no
-    level.
+    It is unknown, not unavailable, while FluentPet reports no level, as it does
+    while the Base runs plugged in.
     """
     await setup_integration(hass, mock_config_entry)
-    # Plugged in.
+    # Plugged in, without a level.
     state = hass.states.get(BASE_BATTERY)
     assert state.state == STATE_UNKNOWN
     assert state.attributes["device_class"] == "battery"
@@ -401,10 +401,10 @@ async def test_base_battery_power_modes(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """The Base battery sensor follows the power mode across refreshes.
+    """The Base battery sensor shows the level FluentPet reports, in any power mode.
 
-    Plugged in it is unknown but available, also if FluentPet still reports a
-    level; on battery, or without a known power mode, it shows the level.
+    Plugged in, FluentPet reports no level, so it is unknown but available; a
+    level FluentPet does report is shown.
     """
     await setup_integration(hass, mock_config_entry)
     _, second = mock_client.async_get_bases.return_value
@@ -412,7 +412,7 @@ async def test_base_battery_power_modes(
 
     for power_mode, battery_level, expected in (
         ("plugged_in", None, STATE_UNKNOWN),
-        ("plugged_in", 50, STATE_UNKNOWN),
+        ("plugged_in", 50, "50"),
         ("battery", 50, "50"),
         (None, 75, "75"),
         ("unrecognized", 25, "25"),

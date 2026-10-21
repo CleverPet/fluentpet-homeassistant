@@ -8,7 +8,7 @@ import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiohttp import ClientPayloadError, web
+from aiohttp import web
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -52,7 +52,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import OAuth2TokenRequestConnectionError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
-from homeassistant.util.aiohttp import MockRequest, MockStreamReader
+from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
 
 from .common import SECRET, load_json_fixture, setup_integration, signed_headers
 from .conftest import (
@@ -694,7 +694,8 @@ async def _deliver_cloudhook(
         remote=None,
     )
     response = await async_handle_webhook(hass, WEBHOOK_ID, request)
-    return response.status
+    # Home Assistant Cloud serializes the response to relay it.
+    return int(serialize_response(response)["status"])
 
 
 @pytest.mark.usefixtures("external_url", "mock_cloud")
@@ -740,6 +741,23 @@ async def test_cloudhook_battery_delivery_updates_sensor(
 
 
 @pytest.mark.usefixtures("external_url", "mock_cloud")
+async def test_cloudhook_non_ascii_delivery(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    cloudhook_entry: MockConfigEntry,
+) -> None:
+    """A UTF-8 body relayed as text by Home Assistant Cloud keeps its signature."""
+    await setup_integration(hass, cloudhook_entry)
+    event = json.loads(_body("press_created"))
+    event["payload"]["button"]["name"] = "Café 🐕"
+    body = json.dumps(event, ensure_ascii=False).encode()
+    assert not body.isascii()
+    assert await _deliver_cloudhook(hass, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).attributes["button"]["name"] == "Café 🐕"
+
+
+@pytest.mark.usefixtures("external_url", "mock_cloud")
 async def test_cloudhook_unsigned_delivery_rejected(
     hass: HomeAssistant,
     mock_client: AsyncMock,
@@ -778,29 +796,68 @@ async def test_cloudhook_unreadable_body_rejected(
 
 
 @pytest.mark.usefixtures("external_url")
-@pytest.mark.parametrize(
-    "error",
-    [
-        ClientPayloadError("truncated"),
-        ConnectionResetError("reset"),
-        web.HTTPRequestEntityTooLarge(max_size=1, actual_size=2),
-    ],
-)
-async def test_unreadable_body_rejected(
+async def test_undecodable_body_rejected(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A direct request whose body cannot be decoded is answered with 400."""
+    await setup_integration(hass, registered_entry)
+    body = b"not gzip"
+    headers = {**signed_headers(body), "Content-Encoding": "gzip"}
+    assert await _post(hass_client_no_auth, body, headers) == 400
+    await hass.async_block_till_done()
+    assert registered_entry.runtime_data.webhook.last_delivery is None
+    assert (
+        "Could not read the body of FluentPet webhook delivery "
+        "00000000-0000-4000-8000-00000000d001"
+    ) in caplog.text
+    assert "Error processing webhook" not in caplog.text
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_oversized_body_rejected(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A direct request over the server's body size limit is answered with 413."""
+    await setup_integration(hass, registered_entry)
+    body = _body("press_created")
+    with patch.object(hass.http.app, "_client_max_size", 64):
+        assert await _post(hass_client_no_auth, body, signed_headers(body)) == 413
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    assert registered_entry.runtime_data.webhook.last_delivery is None
+    assert (
+        "Rejected FluentPet webhook delivery 00000000-0000-4000-8000-00000000d001: "
+        "Maximum request body size 64 exceeded"
+    ) in caplog.text
+    assert "Error processing webhook" not in caplog.text
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_disconnected_body_rejected(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     registered_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
-    error: Exception,
 ) -> None:
-    """A direct request whose body cannot be read is answered with 400."""
+    """A direct request whose sender disconnected mid-body is answered with 400.
+
+    A disconnect cannot be staged with the test client, so the read is mocked.
+    """
     await setup_integration(hass, registered_entry)
     body = _body("press_created")
     request = MagicMock(spec=web.Request)
     request.method = "POST"
     request.remote = "203.0.113.1"
     request.headers = signed_headers(body)
-    request.read = AsyncMock(side_effect=error)
+    request.read = AsyncMock(side_effect=ConnectionResetError("reset"))
     response = await async_handle_webhook(hass, WEBHOOK_ID, request)
     assert response.status == 400
     await hass.async_block_till_done()

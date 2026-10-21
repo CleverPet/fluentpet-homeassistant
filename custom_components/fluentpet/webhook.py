@@ -6,7 +6,7 @@ from http import HTTPStatus
 import re
 from typing import Any
 
-from aiohttp import ClientError, web
+from aiohttp import web
 from aiohttp.hdrs import METH_POST
 
 from homeassistant.components import webhook
@@ -620,7 +620,12 @@ class FluentPetWebhookManager:
         delivery = request.headers.get(HEADER_DELIVERY)
         try:
             body = await _async_read_body(request)
-        except (ClientError, OSError, web.HTTPException) as err:
+        except web.HTTPRequestEntityTooLarge as err:
+            LOGGER.warning(
+                "Rejected FluentPet webhook delivery %s: %s", delivery, err.text
+            )
+            return web.Response(status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        except (web.RequestPayloadError, OSError) as err:
             LOGGER.warning(
                 "Could not read the body of FluentPet webhook delivery %s: %s",
                 delivery,
@@ -666,8 +671,9 @@ async def _async_read_body(request: web.Request | MockRequest) -> bytes:
     """Return the raw body of a direct or a Home Assistant Cloud request.
 
     Home Assistant Cloud hands a cloudhook delivery over as a MockRequest, which
-    has no read(). Its content stream returns the whole body. A direct request
-    is read with read(), which enforces the server's body size limit.
+    has no read(). Its content stream returns the whole body from memory. A
+    direct request is read with read(), which enforces the server's body size
+    limit and raises RequestPayloadError for a body it cannot decode.
     """
     if isinstance(request, MockRequest):
         return await request.content.read()

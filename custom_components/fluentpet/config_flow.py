@@ -161,7 +161,10 @@ class FluentPetOAuth2FlowHandler(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 step_id="reauth_confirm",
                 description_placeholders={"name": self._get_reauth_entry().title},
             )
-        return await self.async_step_user()
+        # Sign in again with the entry's implementation, without the pick form.
+        return await self.async_step_user(
+            {"implementation": self._get_reauth_entry().data["auth_implementation"]}
+        )
 
     @override
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:

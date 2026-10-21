@@ -13,8 +13,8 @@ All notable changes to this project are documented in this file.
   Reauthentication flow.
 - Options: refresh interval (30 to 3600 s, default 60) and prefer Home
   Assistant Cloud (default on).
-- Devices: household hub, Bases, and Buttons linked to their Base. Devices are
-  added and removed as the household changes.
+- Devices: household hub, Bases, and Buttons (model Connect Button) linked to
+  their Base. Devices are added and removed as the household changes.
 - Event platform: a press event entity per Button, fired when a learner or
   teacher presses it. The `pressed_by` attribute names who pressed it and
   whether that is a learner or a teacher.

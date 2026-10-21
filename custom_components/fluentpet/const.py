@@ -8,6 +8,7 @@ DOMAIN: Final = "fluentpet"
 LOGGER = logging.getLogger(__package__)
 
 MANUFACTURER: Final = "FluentPet"
+MODEL_BUTTON: Final = "Connect Button"
 MY_FLUENTPET_URL: Final = "https://my.fluent.pet"
 
 OAUTH2_AUTHORIZE: Final = "https://auth.fluent.pet/authorize"

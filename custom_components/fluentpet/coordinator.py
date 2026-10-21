@@ -29,6 +29,7 @@ from .const import (
     LOGGER,
     MANUFACTURER,
     MAX_BACKOFF,
+    MODEL_BUTTON,
     SAFETY_POLL_INTERVAL,
     STORAGE_VERSION,
     STORE_SAVE_DELAY,
@@ -762,7 +763,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 identifiers={(DOMAIN, button.id)},
                 name=button.name,
                 manufacturer=MANUFACTURER,
-                model="Button",
+                model=MODEL_BUTTON,
                 serial_number=button.serial,
                 via_device_id=base_device_ids.get(button.base_id or "", hub.id),
             )

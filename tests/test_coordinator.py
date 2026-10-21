@@ -324,7 +324,7 @@ async def test_devices(
     )
     assert linked is not None
     assert linked.via_device_id == base.id
-    assert linked.model == "Button"
+    assert linked.model == "Connect Button"
     assert linked.serial_number == "TESTBTNSER01"
 
     unlinked = device_registry.async_get_device_by_identifier(
@@ -332,6 +332,54 @@ async def test_devices(
     )
     assert unlinked is not None
     assert unlinked.via_device_id == hub.id
+    assert unlinked.model == "Connect Button"
+
+
+async def test_button_model_updated_on_existing_device(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """A button device registered with the old model keeps its id and entity."""
+    # Not setup_integration: the entry must exist before the device is registered.
+    mock_config_entry.add_to_hass(hass)
+    old = device_registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, OUTSIDE_ID)},
+        manufacturer="FluentPet",
+        model="Button",
+    )
+    old_entity = entity_registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        f"{OUTSIDE_ID}_press",
+        config_entry=mock_config_entry,
+        device_id=old.id,
+        suggested_object_id="outside_press",
+    )
+    assert old_entity.entity_id == PRESS_ENTITY
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, OUTSIDE_ID), mock_config_entry.entry_id
+    )
+    assert device is not None
+    assert device.id == old.id
+    assert device.model == "Connect Button"
+    entity = entity_registry.async_get(PRESS_ENTITY)
+    assert entity is not None
+    assert entity.id == old_entity.id
+    assert entity.unique_id == f"{OUTSIDE_ID}_press"
+    assert entity.device_id == old.id
+    assert [
+        entry.id
+        for entry in er.async_entries_for_device(entity_registry, old.id)
+        if entry.domain == "event"
+    ] == [old_entity.id]
 
 
 async def test_stale_and_new_devices(

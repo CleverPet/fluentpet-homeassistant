@@ -8,6 +8,7 @@ import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiohttp import ClientPayloadError, web
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -39,6 +40,7 @@ from custom_components.fluentpet.fluentpet_api import (
     FluentPetRequestError,
 )
 from custom_components.fluentpet.webhook import webhook_issue_id, webhook_limit_issue_id
+from homeassistant.components.webhook import async_handle_webhook
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_FINAL_WRITE,
     EVENT_HOMEASSISTANT_STOP,
@@ -50,6 +52,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import OAuth2TokenRequestConnectionError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
+from homeassistant.util.aiohttp import MockRequest, MockStreamReader
 
 from .common import SECRET, load_json_fixture, setup_integration, signed_headers
 from .conftest import (
@@ -672,6 +675,139 @@ async def test_battery_delivery_updates_sensor(
     await hass.async_block_till_done()
     assert mock_client.async_get_buttons.await_count == buttons_read + 1
     assert hass.states.get(entity_id).state == expected
+
+
+async def _deliver_cloudhook(
+    hass: HomeAssistant, body: bytes, headers: dict[str, str]
+) -> int:
+    """Deliver a webhook request the way Home Assistant Cloud does; return the status.
+
+    Home Assistant Cloud relays the body as text and hands it to the webhook
+    component as a MockRequest.
+    """
+    request = MockRequest(
+        content=body.decode().encode("utf-8"),
+        headers=headers,
+        method="POST",
+        query_string="",
+        mock_source="cloud",
+        remote=None,
+    )
+    response = await async_handle_webhook(hass, WEBHOOK_ID, request)
+    return response.status
+
+
+@pytest.mark.usefixtures("external_url", "mock_cloud")
+async def test_cloudhook_press_delivery(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    cloudhook_entry: MockConfigEntry,
+) -> None:
+    """A press delivered through Home Assistant Cloud fires the event entity."""
+    await setup_integration(hass, cloudhook_entry)
+    body = _body("press_created")
+    assert await _deliver_cloudhook(hass, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    state = hass.states.get(PRESS_ENTITY)
+    assert state.state != STATE_UNKNOWN
+    assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
+    assert state.attributes["replayed"] is False
+    assert cloudhook_entry.runtime_data.webhook.last_delivery is not None
+
+
+@pytest.mark.usefixtures("external_url", "mock_cloud")
+async def test_cloudhook_battery_delivery_updates_sensor(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    cloudhook_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A battery change delivered through Home Assistant Cloud updates the sensor."""
+    await setup_integration(hass, cloudhook_entry)
+    await _wait(hass, freezer, SAFETY_POLL_INTERVAL)
+    assert cloudhook_entry.runtime_data.coordinator.push_active
+    first, second = mock_client.async_get_bases.return_value
+    mock_client.async_get_bases.return_value = [
+        replace(first, battery_level=25, power_mode="battery"),
+        second,
+    ]
+    body = _body("base_updated")
+    headers = signed_headers(body, event_type="base.updated")
+    assert await _deliver_cloudhook(hass, body, headers) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.test_base_battery").state == "25"
+    assert cloudhook_entry.runtime_data.webhook.last_delivery is not None
+
+
+@pytest.mark.usefixtures("external_url", "mock_cloud")
+async def test_cloudhook_unsigned_delivery_rejected(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    cloudhook_entry: MockConfigEntry,
+) -> None:
+    """A cloudhook delivery with a wrong signature is refused with 401."""
+    await setup_integration(hass, cloudhook_entry)
+    body = _body("press_created")
+    headers = signed_headers(body, secret="whsec_" + "1" * 64)
+    assert await _deliver_cloudhook(hass, body, headers) == 401
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    assert cloudhook_entry.runtime_data.webhook.last_delivery is None
+
+
+@pytest.mark.usefixtures("external_url", "mock_cloud")
+async def test_cloudhook_unreadable_body_rejected(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    cloudhook_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A cloudhook body that cannot be read is answered with 400 and a warning."""
+    await setup_integration(hass, cloudhook_entry)
+    body = _body("press_created")
+    with patch.object(MockStreamReader, "read", side_effect=OSError("broken")):
+        assert await _deliver_cloudhook(hass, body, signed_headers(body)) == 400
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    assert cloudhook_entry.runtime_data.webhook.last_delivery is None
+    assert (
+        "Could not read the body of FluentPet webhook delivery "
+        "00000000-0000-4000-8000-00000000d001: broken"
+    ) in caplog.text
+    assert "Error processing webhook" not in caplog.text
+
+
+@pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientPayloadError("truncated"),
+        ConnectionResetError("reset"),
+        web.HTTPRequestEntityTooLarge(max_size=1, actual_size=2),
+    ],
+)
+async def test_unreadable_body_rejected(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    """A direct request whose body cannot be read is answered with 400."""
+    await setup_integration(hass, registered_entry)
+    body = _body("press_created")
+    request = MagicMock(spec=web.Request)
+    request.method = "POST"
+    request.remote = "203.0.113.1"
+    request.headers = signed_headers(body)
+    request.read = AsyncMock(side_effect=error)
+    response = await async_handle_webhook(hass, WEBHOOK_ID, request)
+    assert response.status == 400
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    assert registered_entry.runtime_data.webhook.last_delivery is None
+    assert "Could not read the body of FluentPet webhook delivery" in caplog.text
+    assert "Error processing webhook" not in caplog.text
 
 
 @pytest.mark.usefixtures("external_url")

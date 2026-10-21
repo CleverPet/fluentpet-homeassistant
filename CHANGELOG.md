@@ -34,7 +34,10 @@ All notable changes to this project are documented in this file.
   `button.updated` event updates the sensor right away.
 - Push through a FluentPet household webhook, delivered to a Home Assistant
   Cloud cloudhook or the external https URL, with HMAC signature verification,
-  a 5 minute timestamp window and deduplication.
+  a 5 minute timestamp window and deduplication. Deliveries relayed by Home
+  Assistant Cloud are read and processed like direct requests. A delivery
+  whose body cannot be read is answered with 400 and logged as a warning with
+  its delivery id, so FluentPet counts it as failed.
 - Event feed read at every refresh, with the feed position and the
   last processed event ids stored across restarts, so presses are neither
   missed nor fired twice. Backoff on rate limits and server errors, up to 10

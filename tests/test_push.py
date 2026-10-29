@@ -1027,9 +1027,7 @@ async def test_missed_press_in_safety_poll_live(
     """A press the webhook missed, read by a safety poll later, is not replayed."""
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
     data = load_json_fixture("events/press_created.json")
-    data["payload"]["press"]["occurred_at"] = (
-        dt_util.utcnow() - timedelta(minutes=4)
-    ).isoformat()
+    data["occurred_at"] = (dt_util.utcnow() - timedelta(minutes=4)).isoformat()
     mock_client.async_get_events.side_effect = [
         EventPage((Event.from_dict(data),), NEXT_CURSOR)
     ]

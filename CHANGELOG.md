@@ -146,3 +146,9 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
+- Press events read the final FluentPet event format: the `press_order`
+  attribute is the press's position in its interaction at the time of the
+  press, and `occurred_at` is the time of the event. A later press, or a
+  reorder, merge or split in the FluentPet app, can change the order; the
+  last interaction sensor shows the final order. The event format version is
+  read from the event itself.

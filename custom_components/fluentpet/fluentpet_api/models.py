@@ -488,38 +488,37 @@ class PusherRef:
 
 @dataclass(frozen=True, slots=True)
 class Press:
-    """The press of a press.created event.
+    """The press of a press.created event; the event's occurred_at is its time.
 
     Attributes:
-        press_order: Position in its interaction when recorded; interaction.updated has the
-            final order.
-        source: press_topic or device_log.
+        source: base for a press on a Base, app for a press in the FluentPet app.
     """
 
-    occurred_at: datetime
-    press_order: int | None
     source: str | None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the payload JSON."""
-        return cls(
-            occurred_at=_datetime(data, "occurred_at"),
-            press_order=_opt_int(data, "press_order"),
-            source=_opt_str(data, "source"),
-        )
+        return cls(source=_opt_str(data, "source"))
 
 
 @dataclass(frozen=True, slots=True)
 class InteractionRef:
-    """The interaction a press belongs to."""
+    """The interaction a press belongs to.
+
+    Attributes:
+        position: The press's 0-based position in the interaction at press time. Later
+            presses, or a reorder, merge or split in the app, can change it;
+            interaction.updated has the final order.
+    """
 
     id: str
+    position: int | None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the payload JSON."""
-        return cls(id=_str(data, "id"))
+        return cls(id=_str(data, "id"), position=_opt_int(data, "position"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,13 +584,7 @@ class Interaction:
 
 @dataclass(frozen=True, slots=True)
 class EventData:
-    """Typed payload of an event.
-
-    Attributes:
-        version: Payload version (1).
-    """
-
-    version: int
+    """Typed payload of an event."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -693,11 +686,10 @@ class PingData(EventData):
 
 def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
     """Return the typed payload of a known event type, or None for an unknown type."""
-    version = _opt_int(payload, "version") or 1
     if event_type == EventType.PING:
         webhook = payload.get("webhook")
         webhook_id = _opt_str(webhook, "id") if isinstance(webhook, Mapping) else None
-        return PingData(version=version, webhook_id=webhook_id)
+        return PingData(webhook_id=webhook_id)
 
     try:
         known = EventType(event_type)
@@ -707,7 +699,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
     household = HouseholdRef.from_dict(_object(payload.get("household"), "household"))
     if known is EventType.PRESS_CREATED:
         return PressCreatedData(
-            version=version,
             household=household,
             base=_ref(BaseRef.from_dict, payload, "base"),
             button=_ref(ButtonRef.from_dict, payload, "button"),
@@ -717,7 +708,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     if known is EventType.INTERACTION_UPDATED:
         return InteractionUpdatedData(
-            version=version,
             household=household,
             base=_ref(BaseRef.from_dict, payload, "base"),
             pusher=_ref(PusherRef.from_dict, payload, "pusher"),
@@ -730,7 +720,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
     changes = _changes(payload)
     if known in BASE_EVENT_TYPES:
         return BaseEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -739,7 +728,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     if known in BUTTON_EVENT_TYPES:
         return ButtonEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -748,7 +736,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     if known in BUTTON_LINK_EVENT_TYPES:
         return ButtonLinkEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -758,7 +745,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     # The remaining known types are the pusher.* events.
     return PusherEventData(
-        version=version,
         household=household,
         reason=reason,
         changes=changes,
@@ -775,6 +761,7 @@ class Event:
         type: Event type as sent. Unknown types are kept as they are.
         occurred_at: When the fact happened.
         created_at: When FluentPet stored the event.
+        version: Event format version (1).
         payload: The raw payload.
         data: The typed payload, or None for an unknown type or a payload that does not match
             its type's shape (the raw payload is still in `payload`).
@@ -784,6 +771,7 @@ class Event:
     type: str
     occurred_at: datetime
     created_at: datetime
+    version: int
     payload: JsonObject = field(repr=False)
     data: EventData | None
 
@@ -820,6 +808,7 @@ class Event:
             type=event_type,
             occurred_at=_datetime(data, "occurred_at"),
             created_at=_datetime(data, "created_at"),
+            version=_opt_int(data, "version") or 1,
             payload=payload,
             data=typed,
         )

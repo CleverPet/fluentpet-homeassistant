@@ -2,6 +2,7 @@
 
 from collections import OrderedDict, deque
 from collections.abc import Iterable, Iterator
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -84,11 +85,11 @@ class FluentPetEventProcessor:
         # after the event was read.
         self.last_interaction: tuple[str, InteractionUpdatedData] | None = None
         self._ready_buttons: set[str] = set()
-        # Presses (event id and payload) for buttons without an event entity yet,
+        # Presses (event id, time and payload) for buttons without an event entity yet,
         # with the coordinator refresh count at the time they arrived.
         # Each press keeps whether it is replayed.
         self._pending: dict[
-            str, tuple[int, deque[tuple[str, PressCreatedData, bool]]]
+            str, tuple[int, deque[tuple[str, datetime, PressCreatedData, bool]]]
         ] = {}
 
     @property
@@ -114,7 +115,7 @@ class FluentPetEventProcessor:
         self.coordinator.async_schedule_save()
         data = event.data
         if isinstance(data, PressCreatedData):
-            self._async_press(event.id, data, refresh, replayed)
+            self._async_press(event.id, event.occurred_at, data, refresh, replayed)
         elif isinstance(data, InteractionUpdatedData):
             self.last_interaction = (event.id, data)
             async_dispatcher_send(
@@ -158,7 +159,12 @@ class FluentPetEventProcessor:
 
     @callback
     def _async_press(
-        self, event_id: str, data: PressCreatedData, refresh: bool, replayed: bool
+        self,
+        event_id: str,
+        occurred_at: datetime,
+        data: PressCreatedData,
+        refresh: bool,
+        replayed: bool,
     ) -> None:
         """Fire a press on its button entity, or keep it until the entity exists.
 
@@ -175,6 +181,7 @@ class FluentPetEventProcessor:
                 self.hass,
                 signal_press(self.entry_id, button_id),
                 event_id,
+                occurred_at,
                 data,
                 replayed,
             )
@@ -183,7 +190,7 @@ class FluentPetEventProcessor:
         _, presses = self._pending.setdefault(
             button_id, (refresh_count, deque(maxlen=PENDING_PRESS_LIMIT))
         )
-        presses.append((event_id, data, replayed))
+        presses.append((event_id, occurred_at, data, replayed))
         if refresh and button_id not in self.coordinator.known_button_ids:
             self._async_request_refresh()
 
@@ -201,11 +208,12 @@ class FluentPetEventProcessor:
         """Mark a button entity as listening and fire its pending presses."""
         self._ready_buttons.add(button_id)
         if (pending := self._pending.pop(button_id, None)) is not None:
-            for event_id, data, replayed in pending[1]:
+            for event_id, occurred_at, data, replayed in pending[1]:
                 async_dispatcher_send(
                     self.hass,
                     signal_press(self.entry_id, button_id),
                     event_id,
+                    occurred_at,
                     data,
                     replayed,
                 )

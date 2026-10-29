@@ -1274,9 +1274,7 @@ def _old_press(event_id: str) -> Event:
     """Return a press of the Outside button that happened an hour ago."""
     data = load_json_fixture("events/press_created.json")
     data["id"] = event_id
-    data["payload"]["press"]["occurred_at"] = (
-        dt_util.utcnow() - timedelta(hours=1)
-    ).isoformat()
+    data["occurred_at"] = (dt_util.utcnow() - timedelta(hours=1)).isoformat()
     return Event.from_dict(data)
 
 

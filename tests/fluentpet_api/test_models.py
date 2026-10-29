@@ -85,7 +85,7 @@ def test_press_created() -> None:
     assert event.created_at == datetime(2026, 10, 17, 11, 59, 58, 530000, UTC)
     data = event.data
     assert isinstance(data, PressCreatedData)
-    assert data.version == 1
+    assert event.version == 1
     assert event.household is not None
     assert event.household.id == HH
     assert event.household.name == "Test Household"
@@ -100,12 +100,21 @@ def test_press_created() -> None:
     assert data.pusher is not None
     assert data.pusher.name == "Test Learner"
     assert data.pusher.is_teacher is False
-    assert data.press.press_order == 0
-    assert data.press.source == "press_topic"
-    assert data.press.occurred_at == event.occurred_at
+    assert data.press.source == "base"
     assert data.interaction is not None
     assert data.interaction.id == INT_ID
-    assert event.payload["version"] == 1
+    assert data.interaction.position == 0
+    assert "version" not in event.payload
+
+
+def test_press_created_without_position() -> None:
+    """An interaction without a position has position None."""
+    raw = load_json_fixture("events/press_created.json")
+    del raw["payload"]["interaction"]["position"]
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.interaction is not None
+    assert data.interaction.position is None
 
 
 def test_press_created_without_pusher() -> None:
@@ -314,12 +323,20 @@ def test_ping() -> None:
     assert isinstance(event.data, PingData)
     assert event.data.webhook_id == "00000000-0000-4000-8000-000000009001"
     assert event.household is None
+    assert event.version == 1
+
+
+def test_event_without_version() -> None:
+    """An envelope without a version reads as version 1."""
+    raw = load_json_fixture("events/ping.json")
+    del raw["version"]
+    assert parse_event(raw).version == 1
 
 
 def test_ping_without_webhook() -> None:
     """A ping without a webhook object is still a ping."""
     raw = load_json_fixture("events/ping.json")
-    raw["payload"] = {"version": 1}
+    raw["payload"] = {}
     data = parse_event(raw).data
     assert isinstance(data, PingData)
     assert data.webhook_id is None
@@ -333,7 +350,8 @@ def test_unknown_event_type() -> None:
             "type": "learner.celebrated",
             "occurred_at": "2026-10-17T12:00:00.000Z",
             "created_at": "2026-10-17T12:00:00.000Z",
-            "payload": {"version": 1, "household": {"id": HH}},
+            "version": 1,
+            "payload": {"household": {"id": HH}},
             "extra": "ignored",
         }
     )
@@ -367,12 +385,12 @@ def test_malformed_known_payload(name: str, key: str) -> None:
 def test_unknown_payload_keys_and_newer_version() -> None:
     """Unknown keys are ignored and the version is kept."""
     raw = load_json_fixture("events/press_created.json")
-    raw["payload"]["version"] = 2
+    raw["version"] = 2
     raw["payload"]["future"] = {"x": 1}
     raw["payload"]["button"]["future"] = True
-    data = parse_event(raw).data
-    assert isinstance(data, PressCreatedData)
-    assert data.version == 2
+    event = parse_event(raw)
+    assert isinstance(event.data, PressCreatedData)
+    assert event.version == 2
 
 
 @pytest.mark.parametrize(

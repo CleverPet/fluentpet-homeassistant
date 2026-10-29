@@ -3,8 +3,8 @@
   "type": "interaction.updated",
   "occurred_at": "2026-10-17T12:00:13.020Z",
   "created_at": "2026-10-17T12:00:13.100Z",
+  "version": 1,
   "payload": {
-    "version": 1,
     "household": {
       "id": "hh_testhouseholdaaaaaaaaaaaaa",
       "name": "Test Household"

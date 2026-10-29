@@ -1,5 +1,6 @@
 """Button press events of the FluentPet Connect integration."""
 
+from datetime import datetime
 from functools import partial
 from typing import Any, override
 
@@ -43,24 +44,27 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new))
 
 
-def press_attributes(data: PressCreatedData, replayed: bool) -> dict[str, Any]:
+def press_attributes(
+    data: PressCreatedData, occurred_at: datetime, replayed: bool
+) -> dict[str, Any]:
     """Return the event attributes of a press.
 
-    Replayed marks a press read from the feed during catch-up (see
-    FluentPetCoordinator.catching_up), for example after Home Assistant was
-    offline.
+    Occurred_at is the time of the press.created event. Replayed marks a press
+    read from the feed during catch-up (see FluentPetCoordinator.catching_up),
+    for example after Home Assistant was offline.
     """
     button = data.button
     pusher = data.pusher
+    interaction = data.interaction
     return {
         "button": {
             "name": button.name if button else None,
             "normalized_word": button.normalized_word if button else None,
         },
         "pressed_by": {"name": pusher.name, "type": pusher.type} if pusher else None,
-        "press_order": data.press.press_order,
-        "occurred_at": data.press.occurred_at.isoformat(),
-        "interaction_id": data.interaction.id if data.interaction else None,
+        "press_order": interaction.position if interaction else None,
+        "occurred_at": occurred_at.isoformat(),
+        "interaction_id": interaction.id if interaction else None,
         "replayed": replayed,
     }
 
@@ -100,13 +104,21 @@ class FluentPetButtonEvent(FluentPetPushEntity, EventEntity):
 
     @callback
     def _async_handle_press(
-        self, event_id: str, data: PressCreatedData, replayed: bool
+        self,
+        event_id: str,
+        occurred_at: datetime,
+        data: PressCreatedData,
+        replayed: bool,
     ) -> None:
         """Fire a press, or hold it while the entity is unavailable."""
-        self._async_apply(event_id, partial(self._async_fire, data, replayed))
+        self._async_apply(
+            event_id, partial(self._async_fire, data, occurred_at, replayed)
+        )
 
     @callback
-    def _async_fire(self, data: PressCreatedData, replayed: bool) -> None:
+    def _async_fire(
+        self, data: PressCreatedData, occurred_at: datetime, replayed: bool
+    ) -> None:
         """Fire a press."""
-        self._trigger_event(EVENT_PRESS, press_attributes(data, replayed))
+        self._trigger_event(EVENT_PRESS, press_attributes(data, occurred_at, replayed))
         self.async_write_ha_state()

@@ -488,7 +488,9 @@ class PusherRef:
 
 @dataclass(frozen=True, slots=True)
 class Press:
-    """The press of a press.created event; the event's occurred_at is its time.
+    """The press of a press.created event.
+
+    The time of the press is the occurred_at of its event.
 
     Attributes:
         source: base for a press on a Base, app for a press in the FluentPet app.
@@ -803,12 +805,13 @@ class Event:
             typed = _event_data(event_type, payload)
         except FluentPetParseError:
             typed = None
+        version = _opt_int(data, "version")
         return cls(
             id=_str(data, "id"),
             type=event_type,
             occurred_at=_datetime(data, "occurred_at"),
             created_at=_datetime(data, "created_at"),
-            version=_opt_int(data, "version") or 1,
+            version=1 if version is None else version,
             payload=payload,
             data=typed,
         )

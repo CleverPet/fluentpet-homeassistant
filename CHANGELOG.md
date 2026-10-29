@@ -17,7 +17,10 @@ All notable changes to this project are documented in this file.
   their Base. Devices are added and removed as the household changes.
 - Event platform: a press event entity per Button, fired when a learner or
   teacher presses it. The `pressed_by` attribute names who pressed it and
-  whether that is a learner or a teacher.
+  whether that is a learner or a teacher. The `press_order` attribute is the
+  position of the press in its interaction at the time of the press, counted
+  from 0; a later press, or a reorder, merge or split in the FluentPet app,
+  can change it.
 - Sensor platform: last interaction sensor per household, restored across
   restarts, with the same `pressed_by` attribute for the learner or teacher of
   the interaction.
@@ -146,9 +149,3 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
-- Press events read the final FluentPet event format: the `press_order`
-  attribute is the press's position in its interaction at the time of the
-  press, and `occurred_at` is the time of the event. A later press, or a
-  reorder, merge or split in the FluentPet app, can change the order; the
-  last interaction sensor shows the final order. The event format version is
-  read from the event itself.

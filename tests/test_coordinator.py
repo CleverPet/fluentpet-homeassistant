@@ -509,12 +509,18 @@ async def test_press_for_unknown_button(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A press of a button added after setup creates it, then fires."""
+    """A press of a button added after setup creates it, then fires.
+
+    The press waits for the entity and keeps its event time and position.
+    """
     await setup_integration(hass, mock_config_entry)
+    data = load_json_fixture("events/press_created.json")
+    data["id"] = "00000000-0000-4000-8000-0000000000f1"
+    data["occurred_at"] = "2026-10-17T12:30:00.000Z"
+    data["payload"]["button"]["id"] = NEW_BUTTON.id
+    data["payload"]["interaction"]["position"] = 3
     mock_client.async_get_events.side_effect = [
-        EventPage(
-            (_press("00000000-0000-4000-8000-0000000000f1", NEW_BUTTON.id),), "c1"
-        ),
+        EventPage((Event.from_dict(data),), "c1"),
         EventPage((), "c1"),
     ]
     mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
@@ -523,6 +529,8 @@ async def test_press_for_unknown_button(
     state = hass.states.get("event.treat_press")
     assert state is not None
     assert state.state != STATE_UNKNOWN
+    assert state.attributes["press_order"] == 3
+    assert state.attributes["occurred_at"] == "2026-10-17T12:30:00+00:00"
     assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 0
 
 

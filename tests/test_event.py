@@ -68,6 +68,7 @@ async def test_press_order_and_time_from_event(
     data["payload"]["press"]["source"] = "app"
     event = Event.from_dict(data)
     assert isinstance(event.data, PressCreatedData)
+    assert event.data.press.source == "app"
     async_dispatcher_send(
         hass,
         signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),

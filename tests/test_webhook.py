@@ -1954,6 +1954,38 @@ async def _post_held_press(
     await hass.async_block_till_done()
 
 
+async def test_held_press_keeps_order_and_time(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A press held while the entity is unavailable fires with its time and position."""
+    await setup_integration(hass, registered_entry)
+    mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
+    await _refresh(hass, freezer)
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNAVAILABLE
+    data = load_json_fixture("events/press_created.json")
+    data["created_at"] = dt_util.utcnow().isoformat()
+    data["occurred_at"] = "2026-10-17T12:30:00.000Z"
+    data["payload"]["interaction"]["position"] = 3
+    body = json.dumps(data).encode()
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    processor = registered_entry.runtime_data.coordinator.processor
+    assert processor.held_events == {data["id"]}
+
+    mock_client.async_get_bases.side_effect = None
+    mock_client.async_get_events.side_effect = [EventPage((), "c1")]
+    await _refresh(hass, freezer)
+    state = hass.states.get(PRESS_ENTITY)
+    assert state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+    assert state.attributes["press_order"] == 3
+    assert state.attributes["occurred_at"] == "2026-10-17T12:30:00+00:00"
+    assert not processor.held_events
+
+
 async def test_held_press_forgotten_on_unload(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,

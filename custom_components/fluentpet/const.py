@@ -1,8 +1,12 @@
 """Constants for the FluentPet Connect integration."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Final
+
+from homeassistant.util.signal_type import SignalType
+
+from .fluentpet_api import PressCreatedData
 
 DOMAIN: Final = "fluentpet"
 LOGGER = logging.getLogger(__package__)
@@ -92,6 +96,12 @@ def signal_interaction(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_interaction"
 
 
-def signal_press(entry_id: str, button_id: str) -> str:
-    """Return the dispatcher signal for presses of one button."""
-    return f"{DOMAIN}_{entry_id}_press_{button_id}"
+def signal_press(
+    entry_id: str, button_id: str
+) -> SignalType[str, datetime, PressCreatedData, bool]:
+    """Return the dispatcher signal for presses of one button.
+
+    A press carries its event id, the time of the event, the payload and
+    whether it is replayed.
+    """
+    return SignalType(f"{DOMAIN}_{entry_id}_press_{button_id}")

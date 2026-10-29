@@ -2,7 +2,6 @@
 
 from collections import OrderedDict, deque
 from collections.abc import Iterable, Iterator
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -85,11 +84,12 @@ class FluentPetEventProcessor:
         # after the event was read.
         self.last_interaction: tuple[str, InteractionUpdatedData] | None = None
         self._ready_buttons: set[str] = set()
-        # Presses (event id, event time and payload) for buttons without an event
-        # entity yet, with the coordinator refresh count at the time they arrived.
-        # Each press keeps whether it is replayed.
+        # Presses (the event and its payload) for buttons without an event entity
+        # yet, with the coordinator refresh count at the time they arrived. Each
+        # press keeps whether it is replayed. They are stored with the feed state,
+        # so a restart before the entity is ready does not lose them.
         self._pending: dict[
-            str, tuple[int, deque[tuple[str, datetime, PressCreatedData, bool]]]
+            str, tuple[int, deque[tuple[Event, PressCreatedData, bool]]]
         ] = {}
 
     @property
@@ -98,13 +98,25 @@ class FluentPetEventProcessor:
         return sum(len(presses) for _, presses in self._pending.values())
 
     @property
-    def pending_event_ids(self) -> set[str]:
-        """Return the event ids of the presses waiting for their button entity."""
-        return {
-            event_id
-            for _, presses in self._pending.values()
-            for event_id, *_ in presses
-        }
+    def pending_events(self) -> list[Event]:
+        """Return the presses waiting for their button entity, oldest first per button."""
+        return [event for _, presses in self._pending.values() for event, *_ in presses]
+
+    @callback
+    def async_restore_pending(self, events: Iterable[Event]) -> None:
+        """Queue stored presses again that waited for their button entity.
+
+        They count as processed and fire as replayed once their entity is ready;
+        a press of a button still unknown after the next refresh is dropped.
+        """
+        for event in events:
+            data = event.data
+            if not isinstance(data, PressCreatedData) or data.button is None:
+                continue
+            self.seen_events.add(event.id)
+            self._async_queue(
+                data.button.id, event, data, self.coordinator.refresh_count, True
+            )
 
     @callback
     def async_process(
@@ -124,7 +136,7 @@ class FluentPetEventProcessor:
         self.coordinator.async_schedule_save()
         data = event.data
         if isinstance(data, PressCreatedData):
-            self._async_press(event.id, event.occurred_at, data, refresh, replayed)
+            self._async_press(event, data, refresh, replayed)
         elif isinstance(data, InteractionUpdatedData):
             self.last_interaction = (event.id, data)
             async_dispatcher_send(
@@ -168,12 +180,7 @@ class FluentPetEventProcessor:
 
     @callback
     def _async_press(
-        self,
-        event_id: str,
-        occurred_at: datetime,
-        data: PressCreatedData,
-        refresh: bool,
-        replayed: bool,
+        self, event: Event, data: PressCreatedData, refresh: bool, replayed: bool
     ) -> None:
         """Fire a press on its button entity, or keep it until the entity exists.
 
@@ -189,19 +196,40 @@ class FluentPetEventProcessor:
             async_dispatcher_send(
                 self.hass,
                 signal_press(self.entry_id, button_id),
-                event_id,
-                occurred_at,
+                event.id,
+                event.occurred_at,
                 data,
                 replayed,
             )
             return
         refresh_count = self.coordinator.refresh_count - (0 if refresh else 1)
+        self._async_queue(button_id, event, data, refresh_count, replayed)
+        if refresh and button_id not in self.coordinator.known_button_ids:
+            self._async_request_refresh()
+
+    @callback
+    def _async_queue(
+        self,
+        button_id: str,
+        event: Event,
+        data: PressCreatedData,
+        refresh_count: int,
+        replayed: bool,
+    ) -> None:
+        """Keep a press until its button entity is ready.
+
+        Past PENDING_PRESS_LIMIT presses of a button the oldest is dropped.
+        """
         _, presses = self._pending.setdefault(
             button_id, (refresh_count, deque(maxlen=PENDING_PRESS_LIMIT))
         )
-        presses.append((event_id, occurred_at, data, replayed))
-        if refresh and button_id not in self.coordinator.known_button_ids:
-            self._async_request_refresh()
+        if len(presses) == presses.maxlen:
+            LOGGER.debug(
+                "Dropping the oldest waiting press %s of button %s",
+                presses[0][0].id,
+                button_id,
+            )
+        presses.append((event, data, replayed))
 
     @callback
     def _async_request_refresh(self) -> None:
@@ -217,16 +245,16 @@ class FluentPetEventProcessor:
         """Mark a button entity as listening and fire its pending presses."""
         self._ready_buttons.add(button_id)
         if (pending := self._pending.pop(button_id, None)) is not None:
-            for event_id, occurred_at, data, replayed in pending[1]:
+            for event, data, replayed in pending[1]:
                 async_dispatcher_send(
                     self.hass,
                     signal_press(self.entry_id, button_id),
-                    event_id,
-                    occurred_at,
+                    event.id,
+                    event.occurred_at,
                     data,
                     replayed,
                 )
-            # The fired presses are stored as processed from now on.
+            # The fired presses no longer wait in the store.
             self.coordinator.async_schedule_save()
 
         def _remove() -> None:
@@ -238,6 +266,7 @@ class FluentPetEventProcessor:
     def async_drop_stale_pending(self) -> None:
         """Drop presses of buttons still unknown after a later refresh."""
         known = self.coordinator.known_button_ids
+        dropped = False
         for button_id, (refresh_count, presses) in list(self._pending.items()):
             if (
                 button_id not in known
@@ -247,3 +276,6 @@ class FluentPetEventProcessor:
                     "Dropping %s presses of unknown button %s", len(presses), button_id
                 )
                 del self._pending[button_id]
+                dropped = True
+        if dropped:
+            self.coordinator.async_schedule_save()

@@ -135,6 +135,15 @@ def test_press_created_legacy() -> None:
     assert data.position == 1
 
 
+@pytest.mark.parametrize(
+    "name", ["press_created", "press_created_legacy", "ping", "interaction_updated"]
+)
+def test_event_to_dict_round_trip(name: str) -> None:
+    """to_dict returns JSON that parses back into the same event."""
+    event = _event(name)
+    assert parse_event(event.to_dict()) == event
+
+
 def test_press_created_legacy_without_interaction() -> None:
     """An earlier-format press without an interaction keeps its position."""
     raw = load_json_fixture("events/press_created_legacy.json")

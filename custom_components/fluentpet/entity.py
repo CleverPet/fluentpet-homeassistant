@@ -57,7 +57,9 @@ class FluentPetPushEntity(FluentPetCoordinatorEntity):
     be applied (more than HELD_UPDATE_LIMIT held, or the entity is removed) has
     its event id forgotten, so the feed delivers it again instead of losing it.
     Held ids are never stored as processed, so a restart (which does not remove
-    entities) leaves them for the feed as well.
+    entities) leaves them for the feed as well. The feed position does not move
+    past a held update: an entity holds updates only while refreshes fail, and
+    the refresh that succeeds applies them before it stores the new position.
     """
 
     def __init__(self, coordinator: FluentPetCoordinator) -> None:

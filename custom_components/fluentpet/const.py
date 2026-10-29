@@ -61,9 +61,12 @@ SAFETY_POLL_INTERVAL: Final = timedelta(minutes=5)
 RESOURCE_POLL_INTERVAL: Final = timedelta(hours=1)
 
 DEDUPE_SIZE: Final = 512
+# Presses kept per button while its event entity is not ready, also across a
+# restart; an older one is dropped.
 PENDING_PRESS_LIMIT: Final = 20
 # Updates an unavailable entity holds; an older one is dropped and its event id
-# forgotten, so the feed delivers it again.
+# forgotten, so the feed, whose position stays before held updates, delivers it
+# again.
 HELD_UPDATE_LIMIT: Final = 100
 STATE_MAX_LENGTH: Final = 255
 

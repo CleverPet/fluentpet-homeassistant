@@ -721,6 +721,7 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
 
     household = HouseholdRef.from_dict(_object(payload.get("household"), "household"))
     if known is EventType.PRESS_CREATED:
+        press = payload.get("press")
         return PressCreatedData(
             household=household,
             base=_ref(BaseRef.from_dict, payload, "base"),
@@ -728,7 +729,7 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
             pusher=_ref(PusherRef.from_dict, payload, "pusher"),
             # A press without its details is still a press.
             press=Press.from_dict(press)
-            if isinstance(press := payload.get("press"), Mapping)
+            if isinstance(press, Mapping)
             else Press(source=None),
             interaction=_ref(InteractionRef.from_dict, payload, "interaction"),
         )
@@ -815,6 +816,17 @@ class Event:
         if isinstance(self.data, HouseholdEventData):
             return self.data.household
         return None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the event JSON that from_dict reads back into this event."""
+        return {
+            "id": self.id,
+            "type": self.type,
+            "occurred_at": self.occurred_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "version": self.version,
+            "payload": dict(self.payload),
+        }
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:

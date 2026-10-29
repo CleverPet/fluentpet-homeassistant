@@ -488,9 +488,10 @@ async def test_pending_press_fires_after_reload(
     freezer: FrozenDateTimeFactory,
     hass_storage: dict[str, Any],
 ) -> None:
-    """A press still waiting for its button at unload is not stored as processed.
+    """A press still waiting for its button at unload is stored and fires once.
 
-    The feed delivers it again after setup, and it fires once.
+    The next setup reads the feed from the stored cursor; a copy of the press the
+    feed delivers again does not fire a second time.
     """
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
     coordinator = mock_config_entry.runtime_data.coordinator
@@ -499,18 +500,23 @@ async def test_pending_press_fires_after_reload(
     coordinator.processor.async_process(press)
     await hass.async_block_till_done()
     assert coordinator.processor.pending_count == 1
-    assert press.id in coordinator.processor.seen_events
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
-    assert press.id not in stored["event_ids"]
+    assert stored["cursor"] == coordinator.cursor
+    assert [event["id"] for event in stored["pending"]] == [press.id]
 
     mock_client.async_get_buttons.side_effect = None
     mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
+    mock_client.async_get_events.reset_mock()
     mock_client.async_get_events.side_effect = [EventPage((press,), NEXT_CURSOR)]
     events = async_capture_events(hass, EVENT_STATE_CHANGED)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
+    assert (
+        mock_client.async_get_events.await_args_list[0].kwargs["since"]
+        == (stored["cursor"])
+    )
     fired = [
         event
         for event in events
@@ -518,10 +524,11 @@ async def test_pending_press_fires_after_reload(
         and "press_order" in event.data["new_state"].attributes
     ]
     assert len(fired) == 1
-    # Fired now, so it is stored as processed.
+    # Fired now, so it no longer waits in the store.
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    assert stored["pending"] == []
     assert press.id in stored["event_ids"]
 
 

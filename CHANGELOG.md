@@ -50,9 +50,10 @@ All notable changes to this project are documented in this file.
   whose body cannot be read is answered with 400 (413 over the body size
   limit) and logged as a warning with its delivery id, so FluentPet counts it
   as failed.
-- Event feed read at every refresh, with the feed position and the
-  last processed event ids stored across restarts, so presses are neither
-  missed nor fired twice. Backoff on rate limits and server errors, up to 10
+- Event feed read at every refresh, with the feed position, the last
+  processed event ids and the presses still waiting for their Button entity
+  stored across restarts, so presses are neither missed nor fired twice.
+  Backoff on rate limits and server errors, up to 10
   minutes.
 - Repair issue when FluentPet disables the webhook after failed deliveries.
 - Diagnostics with tokens, secrets, URLs, names, serial numbers and email

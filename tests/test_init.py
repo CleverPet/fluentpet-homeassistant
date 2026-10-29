@@ -75,6 +75,7 @@ async def test_setup_and_unload(
     assert hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"] == {
         "cursor": TAIL_CURSOR,
         "event_ids": [],
+        "pending": [],
     }
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)

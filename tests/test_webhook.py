@@ -1938,15 +1938,19 @@ async def _post_held_press(
     entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
     event_ids: list[str],
+    **overrides: Any,
 ) -> None:
-    """Post presses while refreshes fail and the webhook is not active."""
+    """Post presses while refreshes fail and the webhook is not active.
+
+    Overrides replace top-level keys of the press.created fixture.
+    """
     await setup_integration(hass, entry)
     assert not entry.runtime_data.webhook.active
     mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
     await _refresh(hass, freezer)
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNAVAILABLE
     for index, event_id in enumerate(event_ids):
-        body = _body("press_created", id=event_id)
+        body = _body("press_created", **overrides, id=event_id)
         headers = signed_headers(
             body, delivery=f"00000000-0000-4000-8000-00000000d1{index:02d}"
         )
@@ -1962,19 +1966,21 @@ async def test_held_press_keeps_order_and_time(
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A press held while the entity is unavailable fires with its time and position."""
-    await setup_integration(hass, registered_entry)
-    mock_client.async_get_bases.side_effect = FluentPetConnectionError("boom")
-    await _refresh(hass, freezer)
-    assert hass.states.get(PRESS_ENTITY).state == STATE_UNAVAILABLE
-    data = load_json_fixture("events/press_created.json")
-    data["created_at"] = dt_util.utcnow().isoformat()
-    data["occurred_at"] = "2026-10-17T12:30:00.000Z"
-    data["payload"]["interaction"]["position"] = 3
-    body = json.dumps(data).encode()
-    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
-    await hass.async_block_till_done()
+    press_id = "00000000-0000-4000-8000-0000000000a2"
+    payload = load_json_fixture("events/press_created.json")["payload"]
+    payload["interaction"]["position"] = 3
+    await _post_held_press(
+        hass,
+        hass_client_no_auth,
+        mock_client,
+        registered_entry,
+        freezer,
+        [press_id],
+        occurred_at="2026-10-17T12:30:00.000Z",
+        payload=payload,
+    )
     processor = registered_entry.runtime_data.coordinator.processor
-    assert processor.held_events == {data["id"]}
+    assert processor.held_events == {press_id}
 
     mock_client.async_get_bases.side_effect = None
     mock_client.async_get_events.side_effect = [EventPage((), "c1")]

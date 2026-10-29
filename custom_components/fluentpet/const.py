@@ -6,7 +6,7 @@ from typing import Final
 
 from homeassistant.util.signal_type import SignalType
 
-from .fluentpet_api import PressCreatedData
+from .fluentpet_api import InteractionUpdatedData, PressCreatedData
 
 DOMAIN: Final = "fluentpet"
 LOGGER = logging.getLogger(__package__)
@@ -91,9 +91,12 @@ ISSUE_WEBHOOK_LIMIT: Final = "webhook_limit"
 ISSUE_NOT_ADMIN: Final = "not_admin"
 
 
-def signal_interaction(entry_id: str) -> str:
-    """Return the dispatcher signal for interaction updates of an entry."""
-    return f"{DOMAIN}_{entry_id}_interaction"
+def signal_interaction(entry_id: str) -> SignalType[str, InteractionUpdatedData]:
+    """Return the dispatcher signal for interaction updates of an entry.
+
+    An update carries its event id and the payload.
+    """
+    return SignalType(f"{DOMAIN}_{entry_id}_interaction")
 
 
 def signal_press(

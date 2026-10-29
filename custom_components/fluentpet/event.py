@@ -49,9 +49,10 @@ def press_attributes(
 ) -> dict[str, Any]:
     """Return the event attributes of a press.
 
-    Occurred_at is the time of the press.created event. Replayed marks a press
-    read from the feed during catch-up (see FluentPetCoordinator.catching_up),
-    for example after Home Assistant was offline.
+    `occurred_at` is the time of the press.created event. Replayed marks a
+    press read from the feed during catch-up (see
+    FluentPetCoordinator.catching_up), for example after Home Assistant was
+    offline.
     """
     button = data.button
     pusher = data.pusher

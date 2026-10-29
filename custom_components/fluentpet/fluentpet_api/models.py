@@ -511,7 +511,7 @@ class InteractionRef:
     Attributes:
         position: The press's 0-based position in the interaction at press time. Later
             presses, or a reorder, merge or split in the app, can change it;
-            interaction.updated has the final order.
+            interaction.updated has the current order.
     """
 
     id: str
@@ -556,7 +556,7 @@ class Interaction:
 
     Attributes:
         occurred_at: Time of its first press.
-        presses: Presses in their final order.
+        presses: Presses in their order at the time of the event.
     """
 
     id: str

@@ -85,8 +85,8 @@ class FluentPetEventProcessor:
         # after the event was read.
         self.last_interaction: tuple[str, InteractionUpdatedData] | None = None
         self._ready_buttons: set[str] = set()
-        # Presses (event id, time and payload) for buttons without an event entity yet,
-        # with the coordinator refresh count at the time they arrived.
+        # Presses (event id, event time and payload) for buttons without an event
+        # entity yet, with the coordinator refresh count at the time they arrived.
         # Each press keeps whether it is replayed.
         self._pending: dict[
             str, tuple[int, deque[tuple[str, datetime, PressCreatedData, bool]]]

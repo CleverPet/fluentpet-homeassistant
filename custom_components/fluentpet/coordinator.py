@@ -272,16 +272,17 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
     def _store_data(self) -> dict[str, Any]:
         """Return the cursor and the recently processed event ids to store.
 
-        Ids of updates an entity still holds are left out: they were not applied,
-        so after a restart the feed delivers them again.
+        Ids of updates an entity still holds, and of presses still waiting for
+        their button entity, are left out: they were not applied, so after a
+        restart the feed delivers them again.
         """
-        held = self.processor.held_events
+        unapplied = self.processor.held_events | self.processor.pending_event_ids
         return {
             "cursor": self.cursor,
             "event_ids": [
                 event_id
                 for event_id in self.processor.seen_events
-                if event_id not in held
+                if event_id not in unapplied
             ],
         }
 

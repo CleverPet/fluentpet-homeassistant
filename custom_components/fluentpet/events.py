@@ -97,6 +97,15 @@ class FluentPetEventProcessor:
         """Return the number of presses waiting for their button entity."""
         return sum(len(presses) for _, presses in self._pending.values())
 
+    @property
+    def pending_event_ids(self) -> set[str]:
+        """Return the event ids of the presses waiting for their button entity."""
+        return {
+            event_id
+            for _, presses in self._pending.values()
+            for event_id, *_ in presses
+        }
+
     @callback
     def async_process(
         self, event: Event, *, refresh: bool = True, replayed: bool = False
@@ -217,6 +226,8 @@ class FluentPetEventProcessor:
                     data,
                     replayed,
                 )
+            # The fired presses are stored as processed from now on.
+            self.coordinator.async_schedule_save()
 
         def _remove() -> None:
             self._ready_buttons.discard(button_id)

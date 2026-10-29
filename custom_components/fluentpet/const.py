@@ -2,11 +2,12 @@
 
 from datetime import datetime, timedelta
 import logging
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from homeassistant.util.signal_type import SignalType
 
-from .fluentpet_api import InteractionUpdatedData, PressCreatedData
+if TYPE_CHECKING:
+    from .fluentpet_api import InteractionUpdatedData, PressCreatedData
 
 DOMAIN: Final = "fluentpet"
 LOGGER = logging.getLogger(__package__)

@@ -1,5 +1,6 @@
 """Tests for the FluentPet Connect coordinator and event feed."""
 
+import asyncio
 from dataclasses import replace
 from datetime import timedelta
 import importlib
@@ -96,6 +97,10 @@ async def test_feed_fires_entities_and_saves_cursor(
     assert state.state != STATE_UNKNOWN
     assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
     assert hass.states.get(SENSOR_ENTITY).state == "Outside Play"
+    # The press waited for its entity, so it is stored once it has fired; the
+    # unload writes the store.
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
     assert hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"] == {
         "cursor": page.next_cursor,
         "event_ids": [event.id for event in page.events],
@@ -170,12 +175,49 @@ async def test_press_before_entity_ready_fires_after_waiting(
     def _ready(processor: FluentPetEventProcessor, button_id: str) -> Any:
         if button_id == OUTSIDE_ID:
             processor.async_process(late)
+            assert processor.pending_count == 3
         return original(processor, button_id)
 
     events = async_capture_events(hass, EVENT_STATE_CHANGED)
     with patch.object(FluentPetEventProcessor, "async_button_ready", _ready):
         await setup_integration(hass, mock_config_entry)
     assert _fired_presses(events) == MIXED_FIRED
+
+
+async def test_unload_before_entity_ready(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Unloading before the entity fires its waiting presses is safe.
+
+    The deferred call is cancelled, the button is never marked ready, and a
+    later press waits instead of firing on the removed entity.
+    """
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    loop = hass.loop
+    call_soon = loop.call_soon
+    deferred: list[asyncio.TimerHandle] = []
+
+    def _call_soon(callback: Any, *args: Any, **kwargs: Any) -> asyncio.Handle:
+        if getattr(callback, "__name__", None) == "_async_ready":
+            # Hold the call back until after the unload.
+            handle = loop.call_later(3600, callback, *args)
+            deferred.append(handle)
+            return handle
+        return call_soon(callback, *args, **kwargs)
+
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    with patch.object(loop, "call_soon", _call_soon):
+        await setup_integration(hass, mock_config_entry)
+        processor = mock_config_entry.runtime_data.coordinator.processor
+        assert deferred
+        assert processor.pending_count == 3
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+    assert all(handle.cancelled() for handle in deferred)
+    processor.async_process(_press("00000000-0000-4000-8000-000000000103", OUTSIDE_ID))
+    assert processor.pending_count == 4
+    assert _fired_presses(events) == []
 
 
 async def test_feed_presses_in_both_formats(

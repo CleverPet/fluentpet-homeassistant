@@ -437,7 +437,6 @@ def test_unknown_event_type() -> None:
 @pytest.mark.parametrize(
     ("name", "key"),
     [
-        ("press_created", "press"),
         ("press_created", "household"),
         ("interaction_updated", "interaction"),
         ("base_added", "base"),
@@ -452,6 +451,27 @@ def test_malformed_known_payload(name: str, key: str) -> None:
     event = parse_event(raw)
     assert event.data is None
     assert event.event_type is not None
+
+
+@pytest.mark.parametrize("press", [None, "base", ["base"]], ids=["null", "str", "list"])
+def test_press_created_press_not_an_object(press: object) -> None:
+    """A press whose details are not an object is still a press, without a source."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["press"] = press
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source is None
+    assert data.position == 0
+
+
+def test_press_created_without_press() -> None:
+    """A press without its details is still a press."""
+    raw = load_json_fixture("events/press_created.json")
+    del raw["payload"]["press"]
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source is None
+    assert data.button is not None
 
 
 def test_unknown_payload_keys_and_newer_version() -> None:

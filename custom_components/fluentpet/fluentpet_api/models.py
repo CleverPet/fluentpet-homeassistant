@@ -726,7 +726,10 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
             base=_ref(BaseRef.from_dict, payload, "base"),
             button=_ref(ButtonRef.from_dict, payload, "button"),
             pusher=_ref(PusherRef.from_dict, payload, "pusher"),
-            press=Press.from_dict(_object(payload.get("press"), "press")),
+            # A press without its details is still a press.
+            press=Press.from_dict(press)
+            if isinstance(press := payload.get("press"), Mapping)
+            else Press(source=None),
             interaction=_ref(InteractionRef.from_dict, payload, "interaction"),
         )
     if known is EventType.INTERACTION_UPDATED:

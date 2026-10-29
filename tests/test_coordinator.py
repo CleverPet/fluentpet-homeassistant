@@ -16,6 +16,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.fluentpet.const import DOMAIN
 from custom_components.fluentpet.coordinator import not_admin_issue_id
+from custom_components.fluentpet.events import FluentPetEventProcessor
 from custom_components.fluentpet.fluentpet_api import (
     Button,
     Event,
@@ -101,38 +102,95 @@ async def test_feed_fires_entities_and_saves_cursor(
     }
 
 
-async def test_feed_presses_in_both_formats(
-    hass: HomeAssistant,
-    mock_client: AsyncMock,
-    mock_config_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
-) -> None:
-    """A feed page with presses in the current and the earlier format fires both."""
-    await setup_integration(hass, mock_config_entry)
-    page = EventPage.from_dict(
+def _mixed_page() -> EventPage:
+    """Return a feed page of three Outside presses, the second in the earlier format."""
+    third = load_json_fixture("events/press_created.json")
+    third["id"] = "00000000-0000-4000-8000-000000000102"
+    third["occurred_at"] = "2026-10-17T12:00:09.000Z"
+    third["payload"]["interaction"]["position"] = 2
+    return EventPage.from_dict(
         {
             "data": [
                 load_json_fixture("events/press_created.json"),
                 load_json_fixture("events/press_created_legacy.json"),
+                third,
             ],
             "next_cursor": "AAAAAAAAAAtestcursor00000003",
         }
     )
-    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
-    events = async_capture_events(hass, EVENT_STATE_CHANGED)
-    await _refresh(hass, freezer)
-    fired = [
+
+
+MIXED_FIRED = [
+    (0, "2026-10-17T11:59:58.412000+00:00"),
+    (1, "2026-10-17T12:00:05+00:00"),
+    (2, "2026-10-17T12:00:09+00:00"),
+]
+
+
+def _fired_presses(events: list[Any]) -> list[tuple[int | None, str]]:
+    """Return press_order and occurred_at of each state change of the Outside press."""
+    return [
         (
             event.data["new_state"].attributes["press_order"],
             event.data["new_state"].attributes["occurred_at"],
         )
         for event in events
         if event.data["entity_id"] == PRESS_ENTITY
+        and "press_order" in event.data["new_state"].attributes
     ]
-    assert fired == [
-        (0, "2026-10-17T11:59:58.412000+00:00"),
-        (1, "2026-10-17T12:00:05+00:00"),
+
+
+async def test_presses_waiting_at_setup_fire_each(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Presses of one button read at setup each fire, in order, in both formats.
+
+    They wait for the button's entity, which fires them once it is added.
+    """
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    assert _fired_presses(events) == MIXED_FIRED
+    assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 0
+
+
+async def test_press_before_entity_ready_fires_after_waiting(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """A press that arrives while the entity is being added fires after the waiting ones."""
+    page = _mixed_page()
+    *waiting, late = page.events
+    mock_client.async_get_events.side_effect = [
+        EventPage(tuple(waiting), page.next_cursor),
+        EventPage((), page.next_cursor),
     ]
+    original = FluentPetEventProcessor.async_button_ready
+
+    def _ready(processor: FluentPetEventProcessor, button_id: str) -> Any:
+        if button_id == OUTSIDE_ID:
+            processor.async_process(late)
+        return original(processor, button_id)
+
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    with patch.object(FluentPetEventProcessor, "async_button_ready", _ready):
+        await setup_integration(hass, mock_config_entry)
+    assert _fired_presses(events) == MIXED_FIRED
+
+
+async def test_feed_presses_in_both_formats(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A refresh that reads presses in both formats fires each on the entity."""
+    await setup_integration(hass, mock_config_entry)
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await _refresh(hass, freezer)
+    assert _fired_presses(events) == MIXED_FIRED
 
 
 async def test_cursor_resumed_after_restart(

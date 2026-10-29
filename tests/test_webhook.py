@@ -1978,6 +1978,46 @@ async def _post_held_press(
     await hass.async_block_till_done()
 
 
+async def test_held_presses_fire_each(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Presses held while the entity is unavailable each fire on recovery, in order."""
+    await _post_held_press(
+        hass, hass_client_no_auth, mock_client, registered_entry, freezer, []
+    )
+    for position in range(3):
+        data = load_json_fixture("events/press_created.json")
+        data["id"] = f"00000000-0000-4000-8000-0000000000c{position + 4}"
+        data["created_at"] = dt_util.utcnow().isoformat()
+        data["occurred_at"] = f"2026-10-17T12:00:0{position}.000Z"
+        data["payload"]["interaction"]["position"] = position
+        body = json.dumps(data).encode()
+        headers = signed_headers(
+            body, delivery=f"00000000-0000-4000-8000-00000000d2{position:02d}"
+        )
+        assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    processor = registered_entry.runtime_data.coordinator.processor
+    assert len(processor.held_events) == 3
+
+    mock_client.async_get_bases.side_effect = None
+    mock_client.async_get_events.side_effect = [EventPage((), "c1")]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await _refresh(hass, freezer)
+    fired = [
+        event.data["new_state"].attributes["press_order"]
+        for event in events
+        if event.data["entity_id"] == PRESS_ENTITY
+        and "press_order" in event.data["new_state"].attributes
+    ]
+    assert fired == [0, 1, 2]
+    assert not processor.held_events
+
+
 async def test_held_press_keeps_order_and_time(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,

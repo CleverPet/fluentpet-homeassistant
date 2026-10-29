@@ -92,7 +92,13 @@ class FluentPetButtonEvent(FluentPetPushEntity, EventEntity):
 
     @override
     async def async_added_to_hass(self) -> None:
-        """Listen for presses, then fire the presses that arrived before."""
+        """Listen for presses, then fire the presses that arrived before.
+
+        The presses that arrived before fire once the entity is added: Home
+        Assistant writes no state before that, so a press fired here would only
+        show in the first state, and only the last of several would be seen.
+        Until then the processor keeps new presses behind the waiting ones.
+        """
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(
@@ -101,6 +107,13 @@ class FluentPetButtonEvent(FluentPetPushEntity, EventEntity):
                 self._async_handle_press,
             )
         )
+        # Scheduled from here, the call runs after Home Assistant marked the
+        # entity added and wrote its first state.
+        self.async_on_remove(self.hass.loop.call_soon(self._async_ready).cancel)
+
+    @callback
+    def _async_ready(self) -> None:
+        """Fire the presses that arrived before the entity was added."""
         self.async_on_remove(self._processor.async_button_ready(self.button_id))
 
     @callback

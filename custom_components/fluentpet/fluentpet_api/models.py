@@ -493,15 +493,24 @@ class Press:
     The time of the press is the occurred_at of its event.
 
     Attributes:
-        source: base for a press on a Base, app for a press in the FluentPet app.
+        source: base or app; older events may say press_topic or device_log.
+        press_order: Events stored before the format change only: the press's
+            position in its interaction. Read PressCreatedData.position instead.
     """
 
     source: str | None
+    press_order: int | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the payload JSON."""
-        return cls(source=_opt_str(data, "source"))
+        # Events stored before the format change still carry press_order (and an
+        # occurred_at equal to the event's, not read) in the press. Read during
+        # the transition; it can be removed once those events have left the feed.
+        return cls(
+            source=_opt_str(data, "source"),
+            press_order=_opt_int(data, "press_order"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -511,7 +520,8 @@ class InteractionRef:
     Attributes:
         position: The press's 0-based position in the interaction at press time. Later
             presses, or a reorder, merge or split in the app, can change it;
-            interaction.updated has the current order.
+            interaction.updated has the current order. None for an event stored
+            before the format change; PressCreatedData.position covers both.
     """
 
     id: str
@@ -609,6 +619,17 @@ class PressCreatedData(HouseholdEventData):
     pusher: PusherRef | None
     press: Press
     interaction: InteractionRef | None
+
+    @property
+    def position(self) -> int | None:
+        """Return the press's 0-based position in its interaction at press time.
+
+        This is interaction.position, or for an event stored before the format
+        change, press.press_order, also when the event names no interaction.
+        """
+        if self.interaction is not None and self.interaction.position is not None:
+            return self.interaction.position
+        return self.press.press_order
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,6 +827,10 @@ class Event:
         except FluentPetParseError:
             typed = None
         version = _opt_int(data, "version")
+        if version is None:
+            # Events stored before the format change carry the version in the
+            # payload. Read during the transition; it can be removed later.
+            version = _opt_int(payload, "version")
         return cls(
             id=_str(data, "id"),
             type=event_type,

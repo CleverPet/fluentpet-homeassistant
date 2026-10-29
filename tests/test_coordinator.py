@@ -101,6 +101,40 @@ async def test_feed_fires_entities_and_saves_cursor(
     }
 
 
+async def test_feed_presses_in_both_formats(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A feed page with presses in the current and the earlier format fires both."""
+    await setup_integration(hass, mock_config_entry)
+    page = EventPage.from_dict(
+        {
+            "data": [
+                load_json_fixture("events/press_created.json"),
+                load_json_fixture("events/press_created_legacy.json"),
+            ],
+            "next_cursor": "AAAAAAAAAAtestcursor00000003",
+        }
+    )
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await _refresh(hass, freezer)
+    fired = [
+        (
+            event.data["new_state"].attributes["press_order"],
+            event.data["new_state"].attributes["occurred_at"],
+        )
+        for event in events
+        if event.data["entity_id"] == PRESS_ENTITY
+    ]
+    assert fired == [
+        (0, "2026-10-17T11:59:58.412000+00:00"),
+        (1, "2026-10-17T12:00:05+00:00"),
+    ]
+
+
 async def test_cursor_resumed_after_restart(
     hass: HomeAssistant,
     mock_client: AsyncMock,

@@ -574,6 +574,26 @@ async def test_press_delivery(
 
 
 @pytest.mark.usefixtures("external_url")
+async def test_legacy_press_delivery(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+) -> None:
+    """A press in the earlier event format fires with its position and time."""
+    await setup_integration(hass, registered_entry)
+    body = _body("press_created_legacy")
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+
+    state = hass.states.get(PRESS_ENTITY)
+    assert state.state != STATE_UNKNOWN
+    assert state.attributes["press_order"] == 1
+    assert state.attributes["occurred_at"] == "2026-10-17T12:00:05+00:00"
+    assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
+
+
+@pytest.mark.usefixtures("external_url")
 async def test_duplicate_delivery_fires_once(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,

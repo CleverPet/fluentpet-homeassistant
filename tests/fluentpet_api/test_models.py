@@ -115,6 +115,70 @@ def test_press_created_without_position() -> None:
     assert isinstance(data, PressCreatedData)
     assert data.interaction is not None
     assert data.interaction.position is None
+    assert data.position is None
+
+
+def test_press_created_legacy() -> None:
+    """A press stored before the format change reads its position and version."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["version"] = 3
+    event = parse_event(raw)
+    assert event.version == 3
+    assert event.occurred_at == datetime(2026, 10, 17, 12, 0, 5, tzinfo=UTC)
+    data = event.data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source == "press_topic"
+    assert data.press.press_order == 1
+    assert data.interaction is not None
+    assert data.interaction.id == INT_ID
+    assert data.interaction.position is None
+    assert data.position == 1
+
+
+def test_press_created_legacy_without_interaction() -> None:
+    """An earlier-format press without an interaction keeps its position."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["interaction"] = None
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.interaction is None
+    assert data.position == 1
+
+
+def test_press_created_position_over_press_order() -> None:
+    """interaction.position wins over a press_order in the press."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["press"]["press_order"] = 4
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.position == 0
+
+
+def test_press_created_legacy_time_not_parsed() -> None:
+    """The press occurred_at of an earlier-format press is not read."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["press"]["occurred_at"] = "not a time"
+    event = parse_event(raw)
+    assert isinstance(event.data, PressCreatedData)
+
+
+def test_mixed_event_page() -> None:
+    """A page with presses in both formats reads both."""
+    page = EventPage.from_dict(
+        {
+            "data": [
+                load_json_fixture("events/press_created.json"),
+                load_json_fixture("events/press_created_legacy.json"),
+            ],
+            "next_cursor": "AAAAAAAAAAtestcursor00000003",
+        }
+    )
+    positions = [
+        event.data.position
+        for event in page.events
+        if isinstance(event.data, PressCreatedData)
+    ]
+    assert positions == [0, 1]
 
 
 def test_press_created_without_pusher() -> None:
@@ -331,6 +395,14 @@ def test_event_without_version() -> None:
     raw = load_json_fixture("events/ping.json")
     del raw["version"]
     assert parse_event(raw).version == 1
+
+
+def test_envelope_version_over_payload() -> None:
+    """The envelope version wins over a payload version, and 0 is kept."""
+    raw = load_json_fixture("events/ping.json")
+    raw["version"] = 0
+    raw["payload"]["version"] = 5
+    assert parse_event(raw).version == 0
 
 
 def test_ping_without_webhook() -> None:

@@ -63,7 +63,7 @@ def press_attributes(
             "normalized_word": button.normalized_word if button else None,
         },
         "pressed_by": {"name": pusher.name, "type": pusher.type} if pusher else None,
-        "press_order": interaction.position if interaction else None,
+        "press_order": data.position,
         "occurred_at": occurred_at.isoformat(),
         "interaction_id": interaction.id if interaction else None,
         "replayed": replayed,

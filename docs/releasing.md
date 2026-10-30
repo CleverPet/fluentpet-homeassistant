@@ -26,4 +26,5 @@ a user-facing change adds its entry there.
 5. Publish a GitHub Release for the tag, with the notes for that version from
    `CHANGELOG.md`.
 
-Once a GitHub Release exists, HACS offers releases, not `main`.
+Once a GitHub Release exists, HACS installs the latest release by default
+instead of `main`.

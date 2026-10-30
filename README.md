@@ -54,8 +54,9 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 ### Manual
 
 1. Download the source archive of the latest
-   [release](https://github.com/CleverPet/fluentpet-homeassistant/releases)
-   and extract it.
+   [release](https://github.com/CleverPet/fluentpet-homeassistant/releases),
+   or, before the first release, of `main` (**Code > Download ZIP**), and
+   extract it.
 2. Copy its `custom_components/fluentpet` folder into the `custom_components`
    folder (create it if missing) of your Home Assistant configuration folder.
 3. Restart Home Assistant.
@@ -114,9 +115,9 @@ and a device per Button. Entity ids depend on the names in your household.
 | --- | --- | --- | --- |
 | Press | `event`, device class `button`, event type `press` | Each Button | `event.outside_press` |
 | Last interaction | `sensor` | Household | `sensor.smith_home_last_interaction` |
-| Last seen | `sensor`, timestamp | Each Base | `sensor.kitchen_base_last_seen` |
-| Power | `binary_sensor`, plug | Each Base | `binary_sensor.kitchen_base_power` |
-| Battery | `sensor`, battery, diagnostic | Each Base, each Button linked to a Base | `sensor.kitchen_base_battery` |
+| Last seen | `sensor`, device class `timestamp` | Each Base | `sensor.kitchen_base_last_seen` |
+| Power | `binary_sensor`, device class `plug` | Each Base | `binary_sensor.kitchen_base_power` |
+| Battery | `sensor`, device class `battery`, diagnostic | Each Base, each Button linked to a Base | `sensor.kitchen_base_battery` |
 
 See [Entities and devices](docs/entities.md) for states and attributes, and
 [Automations](docs/automations.md) for examples.

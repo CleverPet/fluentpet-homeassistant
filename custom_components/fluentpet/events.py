@@ -4,13 +4,17 @@ from collections import OrderedDict, deque
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING
 
+from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     DEDUPE_SIZE,
+    DOMAIN,
     LOGGER,
     PENDING_PRESS_LIMIT,
+    press_unique_id,
     signal_interaction,
     signal_press,
 )
@@ -107,12 +111,19 @@ class FluentPetEventProcessor:
         """Queue stored presses again that waited for their button entity.
 
         They count as processed and fire as replayed once their entity is ready;
-        a press of a button still unknown after the next refresh is dropped.
+        a press of a button still unknown after the next refresh is dropped, as
+        is a press of a button whose press entity is disabled, and a repeated id.
         """
+        restored: set[str] = set()
         for event in events:
             data = event.data
-            if not isinstance(data, PressCreatedData) or data.button is None:
+            if (
+                not isinstance(data, PressCreatedData)
+                or data.button is None
+                or event.id in restored
+            ):
                 continue
+            restored.add(event.id)
             self.seen_events.add(event.id)
             self._async_queue(
                 data.button.id, event, data, self.coordinator.refresh_count, True
@@ -218,8 +229,27 @@ class FluentPetEventProcessor:
     ) -> None:
         """Keep a press until its button entity is ready.
 
-        Past PENDING_PRESS_LIMIT presses of a button the oldest is dropped.
+        Past PENDING_PRESS_LIMIT presses of a button the oldest is dropped. A
+        press of a button whose press entity is disabled is dropped: the entity
+        is not added until it is enabled, and then the press would be stale.
         """
+        registry = er.async_get(self.hass)
+        if (
+            (
+                entity_id := registry.async_get_entity_id(
+                    Platform.EVENT, DOMAIN, press_unique_id(button_id)
+                )
+            )
+            is not None
+            and (entry := registry.async_get(entity_id)) is not None
+            and entry.disabled
+        ):
+            LOGGER.debug(
+                "Dropping press %s of button %s, whose press entity is disabled",
+                event.id,
+                button_id,
+            )
+            return
         _, presses = self._pending.setdefault(
             button_id, (refresh_count, deque(maxlen=PENDING_PRESS_LIMIT))
         )
@@ -254,8 +284,9 @@ class FluentPetEventProcessor:
                     data,
                     replayed,
                 )
-            # The fired presses no longer wait in the store.
-            self.coordinator.async_schedule_save()
+            # The fired presses no longer wait in the store; store that now,
+            # so a restart does not fire them again.
+            self.coordinator.async_save_soon()
 
         def _remove() -> None:
             self._ready_buttons.discard(button_id)

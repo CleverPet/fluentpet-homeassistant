@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import EVENT_PRESS, signal_press
+from .const import EVENT_PRESS, press_unique_id, signal_press
 from .coordinator import FluentPetConfigEntry, FluentPetCoordinator
 from .entity import FluentPetPushEntity, device_info
 from .fluentpet_api import PressCreatedData
@@ -87,7 +87,7 @@ class FluentPetButtonEvent(FluentPetPushEntity, EventEntity):
         self._entry_id = coordinator.config_entry.entry_id
         self._processor = coordinator.processor
         self.button_id = button_id
-        self._attr_unique_id = f"{button_id}_press"
+        self._attr_unique_id = press_unique_id(button_id)
         self._attr_device_info = device_info(button_id)
 
     @override

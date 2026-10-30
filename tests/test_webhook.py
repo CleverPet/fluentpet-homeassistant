@@ -2040,6 +2040,34 @@ async def test_held_presses_fire_each(
     assert not processor.held_events
 
 
+async def test_held_press_applied_before_new_position_stored(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A refresh that moves the feed position applies held presses first.
+
+    The position it stores right away (without new events, as after a reset to
+    the newest event) is stored with the held press as processed.
+    """
+    press_id = "00000000-0000-4000-8000-0000000000a3"
+    await _post_held_press(
+        hass, hass_client_no_auth, mock_client, registered_entry, freezer, [press_id]
+    )
+    mock_client.async_get_bases.side_effect = None
+    mock_client.async_get_events.side_effect = [
+        EventPage((), "AAAAAAAAAAtestcursor00000099")
+    ]
+    await _refresh(hass, freezer)
+    stored = hass_storage[f"{DOMAIN}.{registered_entry.entry_id}"]["data"]
+    assert stored["cursor"] == "AAAAAAAAAAtestcursor00000099"
+    assert press_id in stored["event_ids"]
+    assert hass.states.get(PRESS_ENTITY).state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+
+
 async def test_held_press_keeps_order_and_time(
     hass: HomeAssistant,
     hass_client_no_auth: ClientSessionGenerator,

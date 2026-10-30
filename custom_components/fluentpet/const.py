@@ -103,6 +103,11 @@ def signal_interaction(entry_id: str) -> SignalType[str, InteractionUpdatedData]
     return SignalType(f"{DOMAIN}_{entry_id}_interaction")
 
 
+def press_unique_id(button_id: str) -> str:
+    """Return the unique id of the press event entity of a button."""
+    return f"{button_id}_press"
+
+
 def signal_press(
     entry_id: str, button_id: str
 ) -> SignalType[str, datetime, PressCreatedData, bool]:

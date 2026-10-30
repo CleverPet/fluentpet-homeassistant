@@ -53,8 +53,7 @@ All notable changes to this project are documented in this file.
 - Event feed read at every refresh, with the feed position, the last
   processed event ids and the presses still waiting for their Button entity
   stored across restarts, so presses are neither missed nor fired twice.
-  Backoff on rate limits and server errors, up to 10
-  minutes.
+  Backoff on rate limits and server errors, up to 10 minutes.
 - Repair issue when FluentPet disables the webhook after failed deliveries.
 - Diagnostics with tokens, secrets, URLs, names, serial numbers and email
   addresses redacted.

@@ -1,6 +1,7 @@
 """Tests for the FluentPet API models."""
 
 from datetime import UTC, datetime, timedelta, timezone
+import json
 
 import pytest
 
@@ -136,12 +137,41 @@ def test_press_created_legacy() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["press_created", "press_created_legacy", "ping", "interaction_updated"]
+    "name",
+    [
+        "press_created",
+        "press_created_legacy",
+        "ping",
+        "interaction_updated",
+        "base_added",
+        "base_updated",
+        "button_removed",
+        "button_linked",
+        "pusher_updated",
+    ],
 )
 def test_event_to_dict_round_trip(name: str) -> None:
     """to_dict returns JSON that parses back into the same event."""
     event = _event(name)
-    assert parse_event(event.to_dict()) == event
+    assert parse_event(json.loads(json.dumps(event.to_dict()))) == event
+
+
+def test_unknown_event_to_dict_round_trip() -> None:
+    """An event of an unknown type keeps its type and raw payload through to_dict."""
+    event = parse_event(
+        {
+            "id": "00000000-0000-4000-8000-000000000098",
+            "type": "learner.celebrated",
+            "occurred_at": "2026-10-17T12:00:00.000Z",
+            "created_at": "2026-10-17T12:00:00.000Z",
+            "version": 1,
+            "payload": {"household": {"id": HH}, "streak": 3},
+        }
+    )
+    restored = parse_event(json.loads(json.dumps(event.to_dict())))
+    assert restored == event
+    assert restored.data is None
+    assert restored.payload["streak"] == 3
 
 
 def test_press_created_legacy_without_interaction() -> None:

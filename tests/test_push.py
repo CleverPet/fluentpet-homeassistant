@@ -513,10 +513,8 @@ async def test_pending_press_fires_after_reload(
     events = async_capture_events(hass, EVENT_STATE_CHANGED)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert (
-        mock_client.async_get_events.await_args_list[0].kwargs["since"]
-        == (stored["cursor"])
-    )
+    since = mock_client.async_get_events.await_args_list[0].kwargs["since"]
+    assert since == stored["cursor"]
     fired = [
         event
         for event in events

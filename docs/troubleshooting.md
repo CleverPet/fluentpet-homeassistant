@@ -12,8 +12,8 @@ manages webhooks.
 **Setup says the integration is not configured, or asks for an application
 credential.** Start adding the integration again; it adds the FluentPet
 application credential, as described in
-[Application credential](../README.md#application-credential). Once the integration is set
-up, a restart of Home Assistant adds it too.
+[Application credential](../README.md#application-credential). Once the
+integration is set up, a restart of Home Assistant adds it too.
 
 **Presses arrive late.** The webhook is not active, so presses arrive from the
 event feed at the refresh interval. Check that:

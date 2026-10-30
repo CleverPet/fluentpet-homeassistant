@@ -30,9 +30,10 @@ has no report yet, for an unlinked Button, and when the installed build is
 not a published FluentPet release. A firmware change pushed as a
 `base.updated` or `button.updated` event (reason `firmware_reported`) updates
 the device within seconds; while polling, it shows up at the next refresh.
-FluentPet can also rename a build as a published release without an event. A Base shows that at the next
-refresh or safety poll, which then also reads the Buttons. A Button shows it
-at the safety poll an hour after the Buttons were last read.
+FluentPet can also rename a build as a published release without an event. A
+Base shows that at the next refresh or safety poll, which then also reads the
+Buttons. A Button shows it at the safety poll an hour after the Buttons were
+last read.
 
 Entities:
 

@@ -14,13 +14,14 @@ requests must not contain:
 - Internal environment names or hostnames.
 - Deployment, operator or secrets steps.
 
-## API host
+## FluentPet hosts
 
-The integration talks to one API host: the production host already set in
-`custom_components/fluentpet/const.py` and
-`custom_components/fluentpet/fluentpet_api/const.py`. Code, tests, fixtures
-and docs name only that host. Never commit another host, including as a default
-or example for the advanced API base URL option.
+The integration uses FluentPet's production hosts only: the API host
+`DEFAULT_BASE_URL` in `custom_components/fluentpet/fluentpet_api/const.py`, and
+the sign-in and account hosts in `custom_components/fluentpet/const.py`. Never
+commit any other FluentPet host, including as a default, placeholder or example
+for the advanced API base URL option. Tests that need another host use reserved
+example domains such as `example.com`.
 
 ## Secrets and tests
 
@@ -29,10 +30,14 @@ or example for the advanced API base URL option.
 
 ## Environment and checks
 
-- Each worktree has its own `.venv` with Python 3.14. Create it and install
-  `requirements_test.txt` as in [docs/development.md](docs/development.md#setup).
+- Use a `.venv` with Python 3.14 in the repository root. Create it and install
+  `requirements_test.txt` as in
+  [docs/development.md](docs/development.md#setup).
 - Run `ruff format --check .`, `ruff check .`, `mypy` and `pytest` from `.venv`
   before you hand in a change.
+- hassfest and HACS validation run in CI (`.github/workflows/validate.yml`).
+  When you change `manifest.json`, `strings.json` or `quality_scale.yaml`, run
+  hassfest locally as in [docs/development.md](docs/development.md#checks).
 
 ## Home Assistant conventions
 

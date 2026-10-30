@@ -53,9 +53,12 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 
 ### Manual
 
-1. Copy the `custom_components/fluentpet` folder of this repository into the
-   `custom_components` folder of your Home Assistant configuration directory.
-2. Restart Home Assistant.
+1. Download the source archive of the latest
+   [release](https://github.com/CleverPet/fluentpet-homeassistant/releases)
+   and extract it.
+2. Copy its `custom_components/fluentpet` folder into the `custom_components`
+   folder (create it if missing) of your Home Assistant configuration folder.
+3. Restart Home Assistant.
 
 ## Setup
 
@@ -109,7 +112,7 @@ and a device per Button. Entity ids depend on the names in your household.
 
 | Entity | Platform | Device | Example entity id |
 | --- | --- | --- | --- |
-| Press | `event` (event type `press`) | Each Button | `event.outside_press` |
+| Press | `event`, device class `button`, event type `press` | Each Button | `event.outside_press` |
 | Last interaction | `sensor` | Household | `sensor.smith_home_last_interaction` |
 | Last seen | `sensor`, timestamp | Each Base | `sensor.kitchen_base_last_seen` |
 | Power | `binary_sensor`, plug | Each Base | `binary_sensor.kitchen_base_power` |
@@ -142,11 +145,11 @@ reached, is in [Removal](docs/troubleshooting.md#removal).
 
 ## Documentation
 
-The [docs](docs/README.md) folder has the full reference: entities, how data
-updates, automation examples, troubleshooting, development and releasing.
+The full reference is in [docs](docs/README.md).
 
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
 
-FluentPet is a trademark of CleverPet, Inc. The license does not grant rights to the FluentPet name or logos.
+FluentPet is a trademark of CleverPet, Inc.
+The license does not grant rights to the FluentPet name or logos.

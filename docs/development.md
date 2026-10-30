@@ -40,9 +40,10 @@ The lint, type and test checks run in `.github/workflows/test.yml` as the job
 
 ## API client library
 
-The FluentPet API client is vendored at `custom_components/fluentpet/fluentpet_api`
-and imported as `from .fluentpet_api import ...`. It depends only on `aiohttp`
-and never imports Home Assistant. `libs/fluentpet-api` holds the packaging
+The FluentPet API client is vendored at
+`custom_components/fluentpet/fluentpet_api` and imported as
+`from .fluentpet_api import ...`. It depends only on `aiohttp` and never imports
+Home Assistant. `libs/fluentpet-api` holds the packaging
 metadata for the future PyPI package `fluentpet-api`; nothing is published from
 there yet. Its tests are in `tests/fluentpet_api`. See
 [libs/fluentpet-api/README.md](../libs/fluentpet-api/README.md).

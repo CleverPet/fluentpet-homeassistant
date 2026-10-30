@@ -97,7 +97,7 @@ the latest press. Attributes of the latest press:
 | `event_type` | `press` |
 | `button` | `name` and `normalized_word` of the Button |
 | `pressed_by` | `name` and `type` (`learner` or `teacher`) of the learner or teacher who pressed, or `null` when FluentPet does not say |
-| `press_order` | Position of the press in its interaction |
+| `press_order` | Position of the press in its interaction at the time of the press, counted from 0, or `null`. A later press, or a reorder, merge or split in the FluentPet app, can change the order; the last interaction sensor shows the current order of the household's latest interaction |
 | `occurred_at` | When the press happened, ISO 8601 |
 | `interaction_id` | FluentPet id of the interaction the press belongs to, or `null` |
 | `replayed` | `true` for a press read from the event feed during catch-up: after Home Assistant starts or the integration reloads, after failed refreshes, or while the feed was not readable, until the feed is read to its end. `false` for presses the webhook delivers, and for a press the webhook missed that a later refresh reads |

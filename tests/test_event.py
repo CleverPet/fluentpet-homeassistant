@@ -47,12 +47,39 @@ async def test_press_without_pusher(
         hass,
         signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),
         event.id,
+        event.occurred_at,
         event.data,
         False,
     )
     state = hass.states.get("event.outside_press")
     assert state.attributes["pressed_by"] is None
+    assert state.attributes["press_order"] is None
     assert state.attributes["interaction_id"] is None
+
+
+async def test_press_order_and_time_from_event(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """press_order is the position in the interaction; occurred_at the event time."""
+    await setup_integration(hass, mock_config_entry)
+    data = load_json_fixture("events/press_created.json")
+    data["occurred_at"] = "2026-10-17T12:30:00.000Z"
+    data["payload"]["interaction"]["position"] = 2
+    data["payload"]["press"]["source"] = "app"
+    event = Event.from_dict(data)
+    assert isinstance(event.data, PressCreatedData)
+    assert event.data.press.source == "app"
+    async_dispatcher_send(
+        hass,
+        signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),
+        event.id,
+        event.occurred_at,
+        event.data,
+        False,
+    )
+    state = hass.states.get("event.outside_press")
+    assert state.attributes["press_order"] == 2
+    assert state.attributes["occurred_at"] == "2026-10-17T12:30:00+00:00"
 
 
 async def test_replayed_attribute_follows_flag(
@@ -70,10 +97,12 @@ async def test_replayed_attribute_follows_flag(
         (timedelta(hours=1), False),
     ):
         data = load_json_fixture("events/press_created.json")
-        data["payload"]["press"]["occurred_at"] = (dt_util.utcnow() - age).isoformat()
+        data["occurred_at"] = (dt_util.utcnow() - age).isoformat()
         event = Event.from_dict(data)
         assert isinstance(event.data, PressCreatedData)
-        async_dispatcher_send(hass, signal, event.id, event.data, replayed)
+        async_dispatcher_send(
+            hass, signal, event.id, event.occurred_at, event.data, replayed
+        )
         state = hass.states.get("event.outside_press")
         assert state.attributes["replayed"] is replayed
 
@@ -95,6 +124,7 @@ async def test_press_by_teacher(
         hass,
         signal_press(mock_config_entry.entry_id, "btn_testbuttonoutsideaaaaaaaaa"),
         event.id,
+        event.occurred_at,
         event.data,
         False,
     )

@@ -1,8 +1,11 @@
 """Tests for the FluentPet Connect coordinator and event feed."""
 
+import asyncio
+import copy
 from dataclasses import replace
 from datetime import timedelta
 import importlib
+import logging
 from typing import Any
 from unittest.mock import ANY, AsyncMock, patch
 
@@ -14,8 +17,9 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
-from custom_components.fluentpet.const import DOMAIN
+from custom_components.fluentpet.const import DOMAIN, PENDING_PRESS_LIMIT
 from custom_components.fluentpet.coordinator import not_admin_issue_id
+from custom_components.fluentpet.events import FluentPetEventProcessor
 from custom_components.fluentpet.fluentpet_api import (
     Button,
     Event,
@@ -95,10 +99,507 @@ async def test_feed_fires_entities_and_saves_cursor(
     assert state.state != STATE_UNKNOWN
     assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
     assert hass.states.get(SENSOR_ENTITY).state == "Outside Play"
+    # The press waited for its entity; it is stored as processed, and no longer
+    # as waiting, right after it fired: the prompt save runs in a later loop
+    # iteration.
+    await hass.async_block_till_done()
     assert hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"] == {
         "cursor": page.next_cursor,
         "event_ids": [event.id for event in page.events],
+        "pending": [],
     }
+
+
+def _mixed_page() -> EventPage:
+    """Return a feed page of three Outside presses, the second in the earlier format."""
+    third = load_json_fixture("events/press_created.json")
+    third["id"] = "00000000-0000-4000-8000-000000000102"
+    third["occurred_at"] = "2026-10-17T12:00:09.000Z"
+    third["payload"]["interaction"]["position"] = 2
+    return EventPage.from_dict(
+        {
+            "data": [
+                load_json_fixture("events/press_created.json"),
+                load_json_fixture("events/press_created_legacy.json"),
+                third,
+            ],
+            "next_cursor": "AAAAAAAAAAtestcursor00000003",
+        }
+    )
+
+
+MIXED_FIRED = [
+    (0, "2026-10-17T11:59:58.412000+00:00"),
+    (1, "2026-10-17T12:00:05+00:00"),
+    (2, "2026-10-17T12:00:09+00:00"),
+]
+
+
+def _fired_presses(events: list[Any]) -> list[tuple[int | None, str]]:
+    """Return press_order and occurred_at of each press fired on the Outside entity.
+
+    The first state of an added entity is left out: it can be the press it
+    restored from before a restart, not a new one.
+    """
+    return [
+        (
+            event.data["new_state"].attributes["press_order"],
+            event.data["new_state"].attributes["occurred_at"],
+        )
+        for event in events
+        if event.data["entity_id"] == PRESS_ENTITY
+        and event.data["old_state"] is not None
+        and "press_order" in event.data["new_state"].attributes
+    ]
+
+
+def _press_states(events: list[Any]) -> list[Any]:
+    """Return the new states of the Outside press that carry a press."""
+    return [
+        event.data["new_state"]
+        for event in events
+        if event.data["entity_id"] == PRESS_ENTITY
+        and "press_order" in event.data["new_state"].attributes
+    ]
+
+
+async def test_presses_waiting_at_setup_fire_each(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Presses of one button read at setup each fire, in order, in both formats.
+
+    They wait for the button's entity, which fires them once it is added.
+    """
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    assert _fired_presses(events) == MIXED_FIRED
+    assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 0
+
+
+async def test_press_before_entity_ready_fires_after_waiting(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """A press that arrives while the entity is being added fires after the waiting ones."""
+    page = _mixed_page()
+    *waiting, late = page.events
+    mock_client.async_get_events.side_effect = [
+        EventPage(tuple(waiting), page.next_cursor),
+        EventPage((), page.next_cursor),
+    ]
+    original = FluentPetEventProcessor.async_button_ready
+
+    def _ready(processor: FluentPetEventProcessor, button_id: str) -> Any:
+        if button_id == OUTSIDE_ID:
+            processor.async_process(late)
+            assert processor.pending_count == 3
+        return original(processor, button_id)
+
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    with patch.object(FluentPetEventProcessor, "async_button_ready", _ready):
+        await setup_integration(hass, mock_config_entry)
+    assert _fired_presses(events) == MIXED_FIRED
+
+
+async def _setup_and_unload_before_ready(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> tuple[FluentPetEventProcessor, list[asyncio.TimerHandle], dict[str, Any]]:
+    """Set up with the mixed page, then unload before the press entity is ready.
+
+    Returns the processor, the deferred calls that would mark it ready, and the
+    store as it was before the unload.
+    """
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    loop = hass.loop
+    call_soon = loop.call_soon
+    deferred: list[asyncio.TimerHandle] = []
+
+    def _call_soon(callback: Any, *args: Any, **kwargs: Any) -> asyncio.Handle:
+        if getattr(callback, "__name__", None) == "_async_ready":
+            # Hold the call back until after the unload.
+            handle = loop.call_later(3600, callback, *args)
+            deferred.append(handle)
+            return handle
+        return call_soon(callback, *args, **kwargs)
+
+    with patch.object(loop, "call_soon", _call_soon):
+        await setup_integration(hass, entry)
+        processor = entry.runtime_data.coordinator.processor
+        assert deferred
+        assert processor.pending_count == 3
+        stored = hass_storage[f"{DOMAIN}.{entry.entry_id}"]
+        assert stored["data"]["cursor"] == page.next_cursor
+        assert len(stored["data"]["pending"]) == 3
+        before_unload = copy.deepcopy(stored)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+    return processor, deferred, before_unload
+
+
+async def test_unload_before_entity_ready(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Unloading before the entity fires its waiting presses is safe.
+
+    The deferred call is cancelled, the button is never marked ready, the
+    waiting presses are stored, and a later press waits instead of firing on
+    the removed entity.
+    """
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    processor, deferred, _ = await _setup_and_unload_before_ready(
+        hass, mock_client, mock_config_entry, hass_storage
+    )
+    assert all(handle.cancelled() for handle in deferred)
+    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    waiting = [event.id for event in _mixed_page().events]
+    assert [event["id"] for event in stored["pending"]] == waiting
+    processor.async_process(_press("00000000-0000-4000-8000-000000000103", OUTSIDE_ID))
+    assert processor.pending_count == 4
+    assert _fired_presses(events) == []
+
+
+async def test_waiting_feed_presses_fire_after_restart(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Feed presses still waiting at a stop fire once after the next setup.
+
+    The stored cursor is past them; they are stored themselves and queued
+    again, and a copy the feed delivers again does not fire a second time.
+    """
+    await _setup_and_unload_before_ready(
+        hass, mock_client, mock_config_entry, hass_storage
+    )
+    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    page = _mixed_page()
+    assert stored["cursor"] == page.next_cursor
+    assert len(stored["pending"]) == 3
+
+    mock_client.async_get_events.reset_mock()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    since = mock_client.async_get_events.await_args_list[0].kwargs["since"]
+    assert since == stored["cursor"]
+    assert _fired_presses(events) == MIXED_FIRED
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    assert processor.pending_count == 0
+    assert all(state.attributes["replayed"] for state in _press_states(events))
+
+
+async def test_kill_before_waiting_presses_fired_fires_them_once(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Feed presses still waiting when Home Assistant is killed fire once after setup.
+
+    The next setup starts from the store as it was before any unload wrote it.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    _, _, before_unload = await _setup_and_unload_before_ready(
+        hass, mock_client, mock_config_entry, hass_storage
+    )
+    hass_storage[key] = before_unload
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert _fired_presses(events) == MIXED_FIRED
+
+
+async def test_kill_after_waiting_presses_fired_fires_nothing_again(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """After waiting presses fired, the store taken right then fires none again.
+
+    The next setup starts from that store, as after a kill, while the feed
+    delivers the same page again.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    assert _fired_presses(events) == MIXED_FIRED
+    last_fired = hass.states.get(PRESS_ENTITY)
+    after_fired = copy.deepcopy(hass_storage[key])
+    assert after_fired["data"]["pending"] == []
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass_storage[key] = after_fired
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    # The entity restores its last press; no press fires.
+    assert [(state.state, state.attributes) for state in _press_states(events)] == [
+        (last_fired.state, last_fired.attributes)
+    ]
+
+
+async def test_presses_of_later_button_saved_promptly(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A button ready in a later loop iteration gets its own prompt save.
+
+    The first button's waiting presses fire and are saved at setup; a button
+    added by a later refresh fires its waiting press, and the store no longer
+    lists it without waiting for the delayed save.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    assert hass_storage[key]["data"]["pending"] == []
+
+    press = _press("00000000-0000-4000-8000-000000000109", NEW_BUTTON.id)
+    mock_client.async_get_events.side_effect = [
+        EventPage((press,), "AAAAAAAAAAtestcursor00000004"),
+        EventPage((), "AAAAAAAAAAtestcursor00000004"),
+    ]
+    mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
+    await _refresh(hass, freezer)
+    await hass.async_block_till_done()
+    assert hass.states.get("event.treat_press").state != STATE_UNKNOWN
+    stored = hass_storage[key]["data"]
+    assert stored["pending"] == []
+    assert press.id in stored["event_ids"]
+
+
+async def test_save_soon_writes_once_per_iteration(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Prompt saves asked for in one loop iteration share one write."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    with patch.object(coordinator.store, "async_save") as save:
+        coordinator.async_save_soon()
+        coordinator.async_save_soon()
+        await hass.async_block_till_done()
+        assert save.await_count == 1
+        coordinator.async_save_soon()
+        await hass.async_block_till_done()
+        assert save.await_count == 2
+
+
+async def test_stored_duplicate_press_fires_once(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A waiting press stored twice is queued and fired once."""
+    press = _event("press_created")
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {
+            "cursor": STORED_CURSOR,
+            "event_ids": [],
+            "pending": [press.to_dict(), press.to_dict()],
+        },
+    )
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    assert _fired_presses(events) == [(0, "2026-10-17T11:59:58.412000+00:00")]
+
+
+async def test_stored_press_without_button_skipped(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A stored waiting press without a button is not queued."""
+    data = load_json_fixture("events/press_created.json")
+    data["payload"]["button"] = None
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data]},
+    )
+    await setup_integration(hass, mock_config_entry)
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    assert processor.pending_count == 0
+    assert data["id"] not in processor.seen_events
+
+
+async def test_disabled_press_entity_keeps_no_presses(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Presses of a button whose press entity is disabled are neither kept nor stored.
+
+    Enabling the entity later fires none of them.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    await setup_integration(hass, mock_config_entry)
+    entity_registry.async_update_entity(
+        PRESS_ENTITY, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    stored = _press("00000000-0000-4000-8000-000000000106", OUTSIDE_ID)
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [stored.to_dict()]},
+    )
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY) is None
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    assert processor.pending_count == 0
+    processor.async_process(_press("00000000-0000-4000-8000-000000000107", OUTSIDE_ID))
+    assert processor.pending_count == 0
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass_storage[key]["data"]["pending"] == []
+
+    entity_registry.async_update_entity(PRESS_ENTITY, disabled_by=None)
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY) is not None
+    assert _fired_presses(events) == []
+
+
+async def test_waiting_press_kept_when_buttons_incomplete(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A read that skips a malformed button does not drop presses waiting for one.
+
+    The button can be the one skipped; it fires once a complete read has it.
+    """
+    await setup_integration(hass, mock_config_entry)
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    processor.async_process(
+        _press("00000000-0000-4000-8000-000000000108", NEW_BUTTON.id), refresh=False
+    )
+
+    async def _skip_new(*args: Any, **kwargs: Any) -> list[Button]:
+        kwargs["on_invalid"](FluentPetParseError("'id' is missing or not a string"))
+        return buttons()
+
+    mock_client.async_get_buttons.side_effect = _skip_new
+    await _refresh(hass, freezer)
+    assert processor.pending_count == 1
+    mock_client.async_get_buttons.side_effect = None
+    mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
+    await _refresh(hass, freezer)
+    assert processor.pending_count == 0
+    assert hass.states.get("event.treat_press").state != STATE_UNKNOWN
+
+
+async def test_stored_press_of_unknown_button_dropped(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A stored waiting press of a button the household no longer has is dropped.
+
+    It does not stay in the store either.
+    """
+    gone = _press("00000000-0000-4000-8000-000000000104", "btn_gone")
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [gone.to_dict()]},
+    )
+    await setup_integration(hass, mock_config_entry)
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    assert gone.id in processor.seen_events
+    assert processor.pending_count == 0
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert (
+        hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]["pending"] == []
+    )
+
+
+async def test_drop_stale_pending_schedules_save(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Dropping stale waiting presses stores the feed state soon; nothing dropped, no save."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    processor = coordinator.processor
+    processor.async_process(
+        _press("00000000-0000-4000-8000-000000000105", "btn_gone"), refresh=False
+    )
+    with patch.object(coordinator, "async_schedule_save") as save:
+        processor.async_drop_stale_pending()
+        processor.async_drop_stale_pending()
+    assert processor.pending_count == 0
+    save.assert_called_once_with()
+
+
+async def test_pending_overflow_logged(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Past the limit the oldest waiting press of a button is dropped and logged."""
+    await setup_integration(hass, mock_config_entry)
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    caplog.set_level(logging.DEBUG, "custom_components.fluentpet")
+    with patch.object(processor, "_async_request_refresh"):
+        for index in range(PENDING_PRESS_LIMIT + 1):
+            processor.async_process(
+                _press(f"00000000-0000-4000-8002-{index:012d}", "btn_gone")
+            )
+    assert processor.pending_count == PENDING_PRESS_LIMIT
+    assert (
+        "Dropping the oldest waiting press 00000000-0000-4000-8002-000000000000"
+        in caplog.text
+    )
+
+
+async def test_feed_presses_in_both_formats(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A refresh that reads presses in both formats fires each on the entity."""
+    await setup_integration(hass, mock_config_entry)
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await _refresh(hass, freezer)
+    assert _fired_presses(events) == MIXED_FIRED
 
 
 async def test_cursor_resumed_after_restart(
@@ -509,12 +1010,18 @@ async def test_press_for_unknown_button(
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A press of a button added after setup creates it, then fires."""
+    """A press of a button added after setup creates it, then fires.
+
+    The press waits for the entity and keeps its event time and position.
+    """
     await setup_integration(hass, mock_config_entry)
+    data = load_json_fixture("events/press_created.json")
+    data["id"] = "00000000-0000-4000-8000-0000000000f1"
+    data["occurred_at"] = "2026-10-17T12:30:00.000Z"
+    data["payload"]["button"]["id"] = NEW_BUTTON.id
+    data["payload"]["interaction"]["position"] = 3
     mock_client.async_get_events.side_effect = [
-        EventPage(
-            (_press("00000000-0000-4000-8000-0000000000f1", NEW_BUTTON.id),), "c1"
-        ),
+        EventPage((Event.from_dict(data),), "c1"),
         EventPage((), "c1"),
     ]
     mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
@@ -523,6 +1030,8 @@ async def test_press_for_unknown_button(
     state = hass.states.get("event.treat_press")
     assert state is not None
     assert state.state != STATE_UNKNOWN
+    assert state.attributes["press_order"] == 3
+    assert state.attributes["occurred_at"] == "2026-10-17T12:30:00+00:00"
     assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 0
 
 
@@ -628,6 +1137,7 @@ async def test_rejected_cursor_restarts_at_tail(
     assert [call.kwargs["since"] for call in calls] == [STORED_CURSOR, TAIL_CURSOR]
     assert caplog.text.count("FluentPet refused the stored event feed position") == 1
     assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
+    await hass.async_block_till_done()
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
     assert stored["cursor"] == "AAAAAAAAAAtestcursor00000014"
 
@@ -655,11 +1165,29 @@ async def test_rejected_cursor_twice_fails(
 @pytest.mark.parametrize(
     ("stored", "tail_read", "warning"),
     [
-        (["not", "a", "dict"], True, "feed state"),
-        ({"cursor": 5, "event_ids": []}, True, "feed position"),
-        ({"event_ids": []}, True, "feed position"),
-        ({"cursor": STORED_CURSOR, "event_ids": "x"}, False, "event ids"),
-        ({"cursor": None, "event_ids": ["a", 5]}, False, "event ids"),
+        (["not", "a", "dict"], True, "the stored FluentPet feed state"),
+        ({"cursor": 5, "event_ids": []}, True, "the stored FluentPet feed position"),
+        ({"event_ids": []}, True, "the stored FluentPet feed position"),
+        (
+            {"cursor": STORED_CURSOR, "event_ids": "x"},
+            False,
+            "invalid stored FluentPet event ids",
+        ),
+        (
+            {"cursor": None, "event_ids": ["a", 5]},
+            False,
+            "invalid stored FluentPet event ids",
+        ),
+        (
+            {"cursor": STORED_CURSOR, "event_ids": [], "pending": "x"},
+            False,
+            "invalid stored waiting FluentPet presses",
+        ),
+        (
+            {"cursor": STORED_CURSOR, "event_ids": [], "pending": [5, {"id": "a"}]},
+            False,
+            "invalid stored waiting FluentPet presses",
+        ),
     ],
 )
 async def test_malformed_store(
@@ -677,12 +1205,11 @@ async def test_malformed_store(
     await setup_integration(hass, mock_config_entry)
     assert mock_config_entry.state is ConfigEntryState.LOADED
     assert mock_client.async_get_tail_cursor.await_count == int(tail_read)
-    assert f"Ignoring the stored FluentPet {warning}" in caplog.text or (
-        f"Ignoring invalid stored FluentPet {warning}" in caplog.text
-    )
+    assert f"Ignoring {warning}" in caplog.text
     saved = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
     assert isinstance(saved["event_ids"], list)
     assert all(isinstance(event_id, str) for event_id in saved["event_ids"])
+    assert saved["pending"] == []
 
 
 async def test_rate_limit_retry_after(
@@ -794,6 +1321,7 @@ async def test_tail_forbidden_at_setup_then_admin(
     assert hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"] == {
         "cursor": TAIL_CURSOR,
         "event_ids": [],
+        "pending": [],
     }
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
 
@@ -1274,9 +1802,7 @@ def _old_press(event_id: str) -> Event:
     """Return a press of the Outside button that happened an hour ago."""
     data = load_json_fixture("events/press_created.json")
     data["id"] = event_id
-    data["payload"]["press"]["occurred_at"] = (
-        dt_util.utcnow() - timedelta(hours=1)
-    ).isoformat()
+    data["occurred_at"] = (dt_util.utcnow() - timedelta(hours=1)).isoformat()
     return Event.from_dict(data)
 
 

@@ -17,7 +17,10 @@ All notable changes to this project are documented in this file.
   their Base. Devices are added and removed as the household changes.
 - Event platform: a press event entity per Button, fired when a learner or
   teacher presses it. The `pressed_by` attribute names who pressed it and
-  whether that is a learner or a teacher.
+  whether that is a learner or a teacher. The `press_order` attribute is the
+  position of the press in its interaction at the time of the press, counted
+  from 0; a later press, or a reorder, merge or split in the FluentPet app,
+  can change it.
 - Sensor platform: last interaction sensor per household, restored across
   restarts, with the same `pressed_by` attribute for the learner or teacher of
   the interaction.
@@ -47,10 +50,10 @@ All notable changes to this project are documented in this file.
   whose body cannot be read is answered with 400 (413 over the body size
   limit) and logged as a warning with its delivery id, so FluentPet counts it
   as failed.
-- Event feed read at every refresh, with the feed position and the
-  last processed event ids stored across restarts, so presses are neither
-  missed nor fired twice. Backoff on rate limits and server errors, up to 10
-  minutes.
+- Event feed read at every refresh, with the feed position, the last
+  processed event ids and the presses still waiting for their Button entity
+  stored across restarts, so presses are neither missed nor fired twice.
+  Backoff on rate limits and server errors, up to 10 minutes.
 - Repair issue when FluentPet disables the webhook after failed deliveries.
 - Diagnostics with tokens, secrets, URLs, names, serial numbers and email
   addresses redacted.

@@ -1,6 +1,7 @@
 """Tests for the FluentPet API models."""
 
 from datetime import UTC, datetime, timedelta, timezone
+import json
 
 import pytest
 
@@ -85,7 +86,7 @@ def test_press_created() -> None:
     assert event.created_at == datetime(2026, 10, 17, 11, 59, 58, 530000, UTC)
     data = event.data
     assert isinstance(data, PressCreatedData)
-    assert data.version == 1
+    assert event.version == 1
     assert event.household is not None
     assert event.household.id == HH
     assert event.household.name == "Test Household"
@@ -100,12 +101,123 @@ def test_press_created() -> None:
     assert data.pusher is not None
     assert data.pusher.name == "Test Learner"
     assert data.pusher.is_teacher is False
-    assert data.press.press_order == 0
-    assert data.press.source == "press_topic"
-    assert data.press.occurred_at == event.occurred_at
+    assert data.press.source == "base"
     assert data.interaction is not None
     assert data.interaction.id == INT_ID
-    assert event.payload["version"] == 1
+    assert data.interaction.position == 0
+    assert "version" not in event.payload
+
+
+def test_press_created_without_position() -> None:
+    """An interaction without a position has position None."""
+    raw = load_json_fixture("events/press_created.json")
+    del raw["payload"]["interaction"]["position"]
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.interaction is not None
+    assert data.interaction.position is None
+    assert data.position is None
+
+
+def test_press_created_legacy() -> None:
+    """A press stored before the format change reads its position and version."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["version"] = 3
+    event = parse_event(raw)
+    assert event.version == 3
+    assert event.occurred_at == datetime(2026, 10, 17, 12, 0, 5, tzinfo=UTC)
+    data = event.data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source == "press_topic"
+    assert data.press.press_order == 1
+    assert data.interaction is not None
+    assert data.interaction.id == INT_ID
+    assert data.interaction.position is None
+    assert data.position == 1
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "press_created",
+        "press_created_legacy",
+        "ping",
+        "interaction_updated",
+        "base_added",
+        "base_updated",
+        "button_removed",
+        "button_linked",
+        "pusher_updated",
+    ],
+)
+def test_event_to_dict_round_trip(name: str) -> None:
+    """to_dict returns JSON that parses back into the same event."""
+    event = _event(name)
+    assert parse_event(json.loads(json.dumps(event.to_dict()))) == event
+
+
+def test_unknown_event_to_dict_round_trip() -> None:
+    """An event of an unknown type keeps its type and raw payload through to_dict."""
+    event = parse_event(
+        {
+            "id": "00000000-0000-4000-8000-000000000098",
+            "type": "learner.celebrated",
+            "occurred_at": "2026-10-17T12:00:00.000Z",
+            "created_at": "2026-10-17T12:00:00.000Z",
+            "version": 1,
+            "payload": {"household": {"id": HH}, "streak": 3},
+        }
+    )
+    restored = parse_event(json.loads(json.dumps(event.to_dict())))
+    assert restored == event
+    assert restored.data is None
+    assert restored.payload["streak"] == 3
+
+
+def test_press_created_legacy_without_interaction() -> None:
+    """An earlier-format press without an interaction keeps its position."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["interaction"] = None
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.interaction is None
+    assert data.position == 1
+
+
+def test_press_created_position_over_press_order() -> None:
+    """interaction.position wins over a press_order in the press."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["press"]["press_order"] = 4
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.position == 0
+
+
+def test_press_created_legacy_time_not_parsed() -> None:
+    """The press occurred_at of an earlier-format press is not read."""
+    raw = load_json_fixture("events/press_created_legacy.json")
+    raw["payload"]["press"]["occurred_at"] = "not a time"
+    event = parse_event(raw)
+    assert isinstance(event.data, PressCreatedData)
+
+
+def test_mixed_event_page() -> None:
+    """A page with presses in both formats reads both."""
+    page = EventPage.from_dict(
+        {
+            "data": [
+                load_json_fixture("events/press_created.json"),
+                load_json_fixture("events/press_created_legacy.json"),
+            ],
+            "next_cursor": "AAAAAAAAAAtestcursor00000003",
+        }
+    )
+    positions = [
+        event.data.position
+        for event in page.events
+        if isinstance(event.data, PressCreatedData)
+    ]
+    assert positions == [0, 1]
 
 
 def test_press_created_without_pusher() -> None:
@@ -314,12 +426,28 @@ def test_ping() -> None:
     assert isinstance(event.data, PingData)
     assert event.data.webhook_id == "00000000-0000-4000-8000-000000009001"
     assert event.household is None
+    assert event.version == 1
+
+
+def test_event_without_version() -> None:
+    """An envelope without a version reads as version 1."""
+    raw = load_json_fixture("events/ping.json")
+    del raw["version"]
+    assert parse_event(raw).version == 1
+
+
+def test_envelope_version_over_payload() -> None:
+    """The envelope version wins over a payload version, and 0 is kept."""
+    raw = load_json_fixture("events/ping.json")
+    raw["version"] = 0
+    raw["payload"]["version"] = 5
+    assert parse_event(raw).version == 0
 
 
 def test_ping_without_webhook() -> None:
     """A ping without a webhook object is still a ping."""
     raw = load_json_fixture("events/ping.json")
-    raw["payload"] = {"version": 1}
+    raw["payload"] = {}
     data = parse_event(raw).data
     assert isinstance(data, PingData)
     assert data.webhook_id is None
@@ -333,7 +461,8 @@ def test_unknown_event_type() -> None:
             "type": "learner.celebrated",
             "occurred_at": "2026-10-17T12:00:00.000Z",
             "created_at": "2026-10-17T12:00:00.000Z",
-            "payload": {"version": 1, "household": {"id": HH}},
+            "version": 1,
+            "payload": {"household": {"id": HH}},
             "extra": "ignored",
         }
     )
@@ -347,7 +476,6 @@ def test_unknown_event_type() -> None:
 @pytest.mark.parametrize(
     ("name", "key"),
     [
-        ("press_created", "press"),
         ("press_created", "household"),
         ("interaction_updated", "interaction"),
         ("base_added", "base"),
@@ -364,15 +492,36 @@ def test_malformed_known_payload(name: str, key: str) -> None:
     assert event.event_type is not None
 
 
+@pytest.mark.parametrize("press", [None, "base", ["base"]], ids=["null", "str", "list"])
+def test_press_created_press_not_an_object(press: object) -> None:
+    """A press whose details are not an object is still a press, without a source."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["press"] = press
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source is None
+    assert data.position == 0
+
+
+def test_press_created_without_press() -> None:
+    """A press without its details is still a press."""
+    raw = load_json_fixture("events/press_created.json")
+    del raw["payload"]["press"]
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.press.source is None
+    assert data.button is not None
+
+
 def test_unknown_payload_keys_and_newer_version() -> None:
     """Unknown keys are ignored and the version is kept."""
     raw = load_json_fixture("events/press_created.json")
-    raw["payload"]["version"] = 2
+    raw["version"] = 2
     raw["payload"]["future"] = {"x": 1}
     raw["payload"]["button"]["future"] = True
-    data = parse_event(raw).data
-    assert isinstance(data, PressCreatedData)
-    assert data.version == 2
+    event = parse_event(raw)
+    assert isinstance(event.data, PressCreatedData)
+    assert event.version == 2
 
 
 @pytest.mark.parametrize(

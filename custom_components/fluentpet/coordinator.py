@@ -167,6 +167,8 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         self.known_base_ids: set[str] = set()
         self.refresh_count = 0
         self._store_loaded = False
+        # Whether a write of the feed state is scheduled (see async_save_soon).
+        self._save_soon = False
         self._feed_forbidden = False
         self._feed_retry = SlowRetry()
         # Whether the next refresh reads the resources also while push is active,
@@ -257,6 +259,14 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             )
             repaired = True
         self.processor.seen_events.load(event_ids)
+        pending, valid = self._async_load_pending(stored.get("pending", []))
+        if not valid:
+            LOGGER.warning(
+                "Ignoring invalid stored waiting FluentPet presses of %s",
+                self.config_entry.title,
+            )
+            repaired = True
+        self.processor.async_restore_pending(pending)
         cursor = stored.get("cursor", ...)
         if cursor is not None and not isinstance(cursor, str):
             LOGGER.warning(
@@ -269,11 +279,35 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         return True, repaired
 
     @callback
-    def _store_data(self) -> dict[str, Any]:
-        """Return the cursor and the recently processed event ids to store.
+    def _async_load_pending(self, stored: object) -> tuple[list[Event], bool]:
+        """Return the stored presses that waited for their button entity.
 
-        Ids of updates an entity still holds are left out: they were not applied,
-        so after a restart the feed delivers them again.
+        Returns the presses that parse and whether all stored entries were valid.
+        """
+        if not isinstance(stored, list):
+            return [], False
+        events: list[Event] = []
+        valid = True
+        for item in stored:
+            try:
+                event = Event.from_dict(item) if isinstance(item, dict) else None
+            except FluentPetParseError:
+                event = None
+            if event is None or not isinstance(event.data, PressCreatedData):
+                valid = False
+                continue
+            events.append(event)
+        return events, valid
+
+    @callback
+    def _store_data(self) -> dict[str, Any]:
+        """Return the cursor, the recently processed event ids and waiting presses.
+
+        The cursor moves past presses still waiting for their button entity, so
+        those presses are stored themselves and queued again after a restart.
+        Ids of updates an entity still holds are left out: an entity holds
+        updates only while refreshes fail, so the cursor is still before them
+        and after a restart the feed delivers them again.
         """
         held = self.processor.held_events
         return {
@@ -283,6 +317,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 for event_id in self.processor.seen_events
                 if event_id not in held
             ],
+            "pending": [event.to_dict() for event in self.processor.pending_events],
         }
 
     @callback
@@ -290,6 +325,28 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         """Store the cursor and processed event ids soon."""
         if self._store_loaded:
             self.store.async_delay_save(self._store_data, STORE_SAVE_DELAY)
+
+    @callback
+    def async_save_soon(self) -> None:
+        """Store the feed state in the next loop iteration.
+
+        Calls in the same iteration share one write, which a later
+        async_schedule_save does not postpone.
+        """
+        if not self._store_loaded or self._save_soon:
+            return
+        self._save_soon = True
+        self.hass.loop.call_soon(self._async_save_now)
+
+    @callback
+    def _async_save_now(self) -> None:
+        """Write the feed state."""
+        self._save_soon = False
+        self.config_entry.async_create_task(
+            self.hass,
+            self.store.async_save(self._store_data()),
+            "fluentpet store feed state",
+        )
 
     @override
     async def async_shutdown(self) -> None:
@@ -740,9 +797,10 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
             return
         if resources is not None:
             self._async_commit_resources(resources)
-        if batch:
+        if batch or self.processor.held_events:
             # Write the available state first, so a state trigger that
-            # excludes changes from unavailable sees the presses.
+            # excludes changes from unavailable sees the presses, and entities
+            # apply the updates they held before the new position is stored.
             self.async_update_listeners()
         for event in batch:
             # This refresh read the resources after the feed, and all of them
@@ -760,7 +818,12 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 self.store.async_save(self._store_data()),
                 "fluentpet store feed position",
             )
-        if resources is not None and resources.buttons_read:
+        if (
+            resources is not None
+            and resources.buttons_read
+            and resources.buttons_complete
+        ):
+            # A button skipped as malformed may still exist: keep its presses.
             self.processor.async_drop_stale_pending()
 
     @callback

@@ -490,36 +490,47 @@ class PusherRef:
 class Press:
     """The press of a press.created event.
 
+    The time of the press is the occurred_at of its event.
+
     Attributes:
-        press_order: Position in its interaction when recorded; interaction.updated has the
-            final order.
-        source: press_topic or device_log.
+        source: base or app; older events may say press_topic or device_log.
+        press_order: Events stored before the format change only: the press's
+            position in its interaction. Read PressCreatedData.position instead.
     """
 
-    occurred_at: datetime
-    press_order: int | None
     source: str | None
+    press_order: int | None = None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the payload JSON."""
+        # Events stored before the format change still carry press_order (and an
+        # occurred_at equal to the event's, not read) in the press. Read during
+        # the transition; it can be removed once those events have left the feed.
         return cls(
-            occurred_at=_datetime(data, "occurred_at"),
-            press_order=_opt_int(data, "press_order"),
             source=_opt_str(data, "source"),
+            press_order=_opt_int(data, "press_order"),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class InteractionRef:
-    """The interaction a press belongs to."""
+    """The interaction a press belongs to.
+
+    Attributes:
+        position: The press's 0-based position in the interaction at press time. Later
+            presses, or a reorder, merge or split in the app, can change it;
+            interaction.updated has the current order. None for an event stored
+            before the format change; PressCreatedData.position covers both.
+    """
 
     id: str
+    position: int | None
 
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the payload JSON."""
-        return cls(id=_str(data, "id"))
+        return cls(id=_str(data, "id"), position=_opt_int(data, "position"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -555,7 +566,7 @@ class Interaction:
 
     Attributes:
         occurred_at: Time of its first press.
-        presses: Presses in their final order.
+        presses: Presses in their order at the time of the event.
     """
 
     id: str
@@ -585,13 +596,7 @@ class Interaction:
 
 @dataclass(frozen=True, slots=True)
 class EventData:
-    """Typed payload of an event.
-
-    Attributes:
-        version: Payload version (1).
-    """
-
-    version: int
+    """Typed payload of an event."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -614,6 +619,17 @@ class PressCreatedData(HouseholdEventData):
     pusher: PusherRef | None
     press: Press
     interaction: InteractionRef | None
+
+    @property
+    def position(self) -> int | None:
+        """Return the press's 0-based position in its interaction at press time.
+
+        This is interaction.position, or for an event stored before the format
+        change, press.press_order, also when the event names no interaction.
+        """
+        if self.interaction is not None and self.interaction.position is not None:
+            return self.interaction.position
+        return self.press.press_order
 
 
 @dataclass(frozen=True, slots=True)
@@ -693,11 +709,10 @@ class PingData(EventData):
 
 def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
     """Return the typed payload of a known event type, or None for an unknown type."""
-    version = _opt_int(payload, "version") or 1
     if event_type == EventType.PING:
         webhook = payload.get("webhook")
         webhook_id = _opt_str(webhook, "id") if isinstance(webhook, Mapping) else None
-        return PingData(version=version, webhook_id=webhook_id)
+        return PingData(webhook_id=webhook_id)
 
     try:
         known = EventType(event_type)
@@ -706,18 +721,20 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
 
     household = HouseholdRef.from_dict(_object(payload.get("household"), "household"))
     if known is EventType.PRESS_CREATED:
+        press = payload.get("press")
         return PressCreatedData(
-            version=version,
             household=household,
             base=_ref(BaseRef.from_dict, payload, "base"),
             button=_ref(ButtonRef.from_dict, payload, "button"),
             pusher=_ref(PusherRef.from_dict, payload, "pusher"),
-            press=Press.from_dict(_object(payload.get("press"), "press")),
+            # A press without its details is still a press.
+            press=Press.from_dict(press)
+            if isinstance(press, Mapping)
+            else Press(source=None),
             interaction=_ref(InteractionRef.from_dict, payload, "interaction"),
         )
     if known is EventType.INTERACTION_UPDATED:
         return InteractionUpdatedData(
-            version=version,
             household=household,
             base=_ref(BaseRef.from_dict, payload, "base"),
             pusher=_ref(PusherRef.from_dict, payload, "pusher"),
@@ -730,7 +747,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
     changes = _changes(payload)
     if known in BASE_EVENT_TYPES:
         return BaseEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -739,7 +755,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     if known in BUTTON_EVENT_TYPES:
         return ButtonEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -748,7 +763,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     if known in BUTTON_LINK_EVENT_TYPES:
         return ButtonLinkEventData(
-            version=version,
             household=household,
             reason=reason,
             changes=changes,
@@ -758,7 +772,6 @@ def _event_data(event_type: str, payload: JsonObject) -> EventData | None:
         )
     # The remaining known types are the pusher.* events.
     return PusherEventData(
-        version=version,
         household=household,
         reason=reason,
         changes=changes,
@@ -775,6 +788,7 @@ class Event:
         type: Event type as sent. Unknown types are kept as they are.
         occurred_at: When the fact happened.
         created_at: When FluentPet stored the event.
+        version: Event format version (1).
         payload: The raw payload.
         data: The typed payload, or None for an unknown type or a payload that does not match
             its type's shape (the raw payload is still in `payload`).
@@ -784,6 +798,7 @@ class Event:
     type: str
     occurred_at: datetime
     created_at: datetime
+    version: int
     payload: JsonObject = field(repr=False)
     data: EventData | None
 
@@ -802,6 +817,17 @@ class Event:
             return self.data.household
         return None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return the event JSON that from_dict reads back into this event."""
+        return {
+            "id": self.id,
+            "type": self.type,
+            "occurred_at": self.occurred_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "version": self.version,
+            "payload": dict(self.payload),
+        }
+
     @classmethod
     def from_dict(cls, data: JsonObject) -> Self:
         """Build from the event JSON.
@@ -815,11 +841,17 @@ class Event:
             typed = _event_data(event_type, payload)
         except FluentPetParseError:
             typed = None
+        version = _opt_int(data, "version")
+        if version is None:
+            # Events stored before the format change carry the version in the
+            # payload. Read during the transition; it can be removed later.
+            version = _opt_int(payload, "version")
         return cls(
             id=_str(data, "id"),
             type=event_type,
             occurred_at=_datetime(data, "occurred_at"),
             created_at=_datetime(data, "created_at"),
+            version=1 if version is None else version,
             payload=payload,
             data=typed,
         )

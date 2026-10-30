@@ -10,6 +10,7 @@ from freezegun.api import FrozenDateTimeFactory
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_capture_events,
     async_fire_time_changed,
 )
 
@@ -24,7 +25,7 @@ from custom_components.fluentpet.fluentpet_api import (
     FluentPetServerError,
 )
 from custom_components.fluentpet.webhook import webhook_healthy
-from homeassistant.const import STATE_UNKNOWN
+from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
@@ -478,6 +479,55 @@ async def test_pending_press_kept_through_failed_refresh(
     assert coordinator.last_update_success
     assert coordinator.processor.pending_count == 0
     assert hass.states.get("event.treat_press").state != STATE_UNKNOWN
+
+
+async def test_pending_press_fires_after_reload(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A press still waiting for its button at unload is stored and fires once.
+
+    The next setup reads the feed from the stored cursor; a copy of the press the
+    feed delivers again does not fire a second time.
+    """
+    await _setup_push(hass, freezer, mock_client, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    press = _press("00000000-0000-4000-8000-000000000a08", NEW_BUTTON.id)
+    mock_client.async_get_buttons.side_effect = FluentPetConnectionError("boom")
+    coordinator.processor.async_process(press)
+    await hass.async_block_till_done()
+    assert coordinator.processor.pending_count == 1
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    assert stored["cursor"] == coordinator.cursor
+    assert [event["id"] for event in stored["pending"]] == [press.id]
+
+    mock_client.async_get_buttons.side_effect = None
+    mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
+    mock_client.async_get_events.reset_mock()
+    mock_client.async_get_events.side_effect = [EventPage((press,), NEXT_CURSOR)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    since = mock_client.async_get_events.await_args_list[0].kwargs["since"]
+    assert since == stored["cursor"]
+    fired = [
+        event
+        for event in events
+        if event.data["entity_id"] == "event.treat_press"
+        and "press_order" in event.data["new_state"].attributes
+    ]
+    assert len(fired) == 1
+    # Fired now, so it no longer waits in the store.
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    assert stored["pending"] == []
+    assert press.id in stored["event_ids"]
 
 
 async def test_safety_poll_lifecycle_event_reads_everything_once(
@@ -1027,9 +1077,7 @@ async def test_missed_press_in_safety_poll_live(
     """A press the webhook missed, read by a safety poll later, is not replayed."""
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
     data = load_json_fixture("events/press_created.json")
-    data["payload"]["press"]["occurred_at"] = (
-        dt_util.utcnow() - timedelta(minutes=4)
-    ).isoformat()
+    data["occurred_at"] = (dt_util.utcnow() - timedelta(minutes=4)).isoformat()
     mock_client.async_get_events.side_effect = [
         EventPage((Event.from_dict(data),), NEXT_CURSOR)
     ]

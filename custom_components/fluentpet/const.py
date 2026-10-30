@@ -1,8 +1,13 @@
 """Constants for the FluentPet Connect integration."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+from homeassistant.util.signal_type import SignalType
+
+if TYPE_CHECKING:
+    from .fluentpet_api import InteractionUpdatedData, PressCreatedData
 
 DOMAIN: Final = "fluentpet"
 LOGGER = logging.getLogger(__package__)
@@ -56,9 +61,12 @@ SAFETY_POLL_INTERVAL: Final = timedelta(minutes=5)
 RESOURCE_POLL_INTERVAL: Final = timedelta(hours=1)
 
 DEDUPE_SIZE: Final = 512
+# Presses kept per button while its event entity is not ready, also across a
+# restart; an older one is dropped.
 PENDING_PRESS_LIMIT: Final = 20
 # Updates an unavailable entity holds; an older one is dropped and its event id
-# forgotten, so the feed delivers it again.
+# forgotten, so the feed, whose position stays before held updates, delivers it
+# again.
 HELD_UPDATE_LIMIT: Final = 100
 STATE_MAX_LENGTH: Final = 255
 
@@ -87,11 +95,25 @@ ISSUE_WEBHOOK_LIMIT: Final = "webhook_limit"
 ISSUE_NOT_ADMIN: Final = "not_admin"
 
 
-def signal_interaction(entry_id: str) -> str:
-    """Return the dispatcher signal for interaction updates of an entry."""
-    return f"{DOMAIN}_{entry_id}_interaction"
+def signal_interaction(entry_id: str) -> SignalType[str, InteractionUpdatedData]:
+    """Return the dispatcher signal for interaction updates of an entry.
+
+    An update carries its event id and the payload.
+    """
+    return SignalType(f"{DOMAIN}_{entry_id}_interaction")
 
 
-def signal_press(entry_id: str, button_id: str) -> str:
-    """Return the dispatcher signal for presses of one button."""
-    return f"{DOMAIN}_{entry_id}_press_{button_id}"
+def press_unique_id(button_id: str) -> str:
+    """Return the unique id of the press event entity of a button."""
+    return f"{button_id}_press"
+
+
+def signal_press(
+    entry_id: str, button_id: str
+) -> SignalType[str, datetime, PressCreatedData, bool]:
+    """Return the dispatcher signal for presses of one button.
+
+    A press carries its event id, the time of the event, the payload and
+    whether it is replayed.
+    """
+    return SignalType(f"{DOMAIN}_{entry_id}_press_{button_id}")

@@ -100,7 +100,9 @@ async def test_feed_fires_entities_and_saves_cursor(
     assert state.attributes["interaction_id"] == "int_testinteractionaaaaaaaaaaa"
     assert hass.states.get(SENSOR_ENTITY).state == "Outside Play"
     # The press waited for its entity; it is stored as processed, and no longer
-    # as waiting, right after it fired.
+    # as waiting, right after it fired: the prompt save runs in a later loop
+    # iteration.
+    await hass.async_block_till_done()
     assert hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"] == {
         "cursor": page.next_cursor,
         "event_ids": [event.id for event in page.events],
@@ -134,7 +136,11 @@ MIXED_FIRED = [
 
 
 def _fired_presses(events: list[Any]) -> list[tuple[int | None, str]]:
-    """Return press_order and occurred_at of each state change of the Outside press."""
+    """Return press_order and occurred_at of each press fired on the Outside entity.
+
+    The first state of an added entity is left out: it can be the press it
+    restored from before a restart, not a new one.
+    """
     return [
         (
             event.data["new_state"].attributes["press_order"],
@@ -142,6 +148,7 @@ def _fired_presses(events: list[Any]) -> list[tuple[int | None, str]]:
         )
         for event in events
         if event.data["entity_id"] == PRESS_ENTITY
+        and event.data["old_state"] is not None
         and "press_order" in event.data["new_state"].attributes
     ]
 
@@ -291,7 +298,7 @@ async def test_waiting_feed_presses_fire_after_restart(
     assert all(state.attributes["replayed"] for state in _press_states(events))
 
 
-async def test_waiting_feed_presses_fire_once_after_kill(
+async def test_kill_before_waiting_presses_fired_fires_them_once(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
@@ -312,6 +319,91 @@ async def test_waiting_feed_presses_fire_once_after_kill(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     assert _fired_presses(events) == MIXED_FIRED
+
+
+async def test_kill_after_waiting_presses_fired_fires_nothing_again(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """After waiting presses fired, the store taken right then fires none again.
+
+    The next setup starts from that store, as after a kill, while the feed
+    delivers the same page again.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    assert _fired_presses(events) == MIXED_FIRED
+    last_fired = hass.states.get(PRESS_ENTITY)
+    after_fired = copy.deepcopy(hass_storage[key])
+    assert after_fired["data"]["pending"] == []
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass_storage[key] = after_fired
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    # The entity restores its last press; no press fires.
+    assert [(state.state, state.attributes) for state in _press_states(events)] == [
+        (last_fired.state, last_fired.attributes)
+    ]
+
+
+async def test_presses_of_later_button_saved_promptly(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A button ready in a later loop iteration gets its own prompt save.
+
+    The first button's waiting presses fire and are saved at setup; a button
+    added by a later refresh fires its waiting press, and the store no longer
+    lists it without waiting for the delayed save.
+    """
+    key = f"{DOMAIN}.{mock_config_entry.entry_id}"
+    page = _mixed_page()
+    mock_client.async_get_events.side_effect = [page, EventPage((), page.next_cursor)]
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    assert hass_storage[key]["data"]["pending"] == []
+
+    press = _press("00000000-0000-4000-8000-000000000109", NEW_BUTTON.id)
+    mock_client.async_get_events.side_effect = [
+        EventPage((press,), "AAAAAAAAAAtestcursor00000004"),
+        EventPage((), "AAAAAAAAAAtestcursor00000004"),
+    ]
+    mock_client.async_get_buttons.return_value = [*buttons(), NEW_BUTTON]
+    await _refresh(hass, freezer)
+    await hass.async_block_till_done()
+    assert hass.states.get("event.treat_press").state != STATE_UNKNOWN
+    stored = hass_storage[key]["data"]
+    assert stored["pending"] == []
+    assert press.id in stored["event_ids"]
+
+
+async def test_save_soon_writes_once_per_iteration(
+    hass: HomeAssistant, mock_client: AsyncMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Prompt saves asked for in one loop iteration share one write."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    with patch.object(coordinator.store, "async_save") as save:
+        coordinator.async_save_soon()
+        coordinator.async_save_soon()
+        await hass.async_block_till_done()
+        assert save.await_count == 1
+        coordinator.async_save_soon()
+        await hass.async_block_till_done()
+        assert save.await_count == 2
 
 
 async def test_stored_duplicate_press_fires_once(
@@ -1045,6 +1137,7 @@ async def test_rejected_cursor_restarts_at_tail(
     assert [call.kwargs["since"] for call in calls] == [STORED_CURSOR, TAIL_CURSOR]
     assert caplog.text.count("FluentPet refused the stored event feed position") == 1
     assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
+    await hass.async_block_till_done()
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
     assert stored["cursor"] == "AAAAAAAAAAtestcursor00000014"
 

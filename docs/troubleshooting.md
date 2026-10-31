@@ -139,8 +139,8 @@ normalized words and audio ids of Buttons; serial numbers; and email addresses.
    Assistant. For a manual installation, delete the
    `custom_components/fluentpet` folder and restart Home Assistant.
 3. Optional: under **Settings > Devices & services > Application
-   credentials**, remove the credential named **FluentPet** (integration
-   FluentPet Connect).
+   credentials**, remove the credential named **FluentPet**, and any other
+   credential you added for FluentPet Connect.
 
 If Home Assistant cannot reach FluentPet during removal, or the sign-in is no
 longer valid, the webhook endpoint stays at FluentPet and a notification says

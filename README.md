@@ -141,10 +141,10 @@ presses, repair issues and unavailable sensors, see
    Assistant. For a manual installation, delete the
    `custom_components/fluentpet` folder and restart Home Assistant.
 3. Optional: under **Settings > Devices & services > Application
-   credentials**, remove the credential named **FluentPet** (integration
-   FluentPet Connect).
+   credentials**, remove the credential named **FluentPet**, and any other
+   credential you added for FluentPet Connect.
 
-What deleting the entry removes, and what to do when FluentPet cannot be
+What deleting an entry removes, and what to do when FluentPet cannot be
 reached, is in [Removal](docs/troubleshooting.md#removal).
 
 ## Documentation

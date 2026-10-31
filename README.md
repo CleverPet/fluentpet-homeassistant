@@ -136,12 +136,13 @@ presses, repair issues and unavailable sensors, see
 ## Removal
 
 1. Go to **Settings > Devices & services > FluentPet Connect**, open the menu
-   of the household entry and choose **Delete**.
+   of each household entry and choose **Delete**.
 2. In HACS, open **FluentPet Connect**, choose **Remove**, and restart Home
    Assistant. For a manual installation, delete the
    `custom_components/fluentpet` folder and restart Home Assistant.
-3. Optional: remove the FluentPet Connect application credential under
-   **Settings > Devices & services > Application credentials**.
+3. Optional: under **Settings > Devices & services > Application
+   credentials**, remove the credential named **FluentPet** (integration
+   FluentPet Connect).
 
 What deleting the entry removes, and what to do when FluentPet cannot be
 reached, is in [Removal](docs/troubleshooting.md#removal).

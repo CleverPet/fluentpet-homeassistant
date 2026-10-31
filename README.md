@@ -140,6 +140,8 @@ presses, repair issues and unavailable sensors, see
 2. In HACS, open **FluentPet Connect**, choose **Remove**, and restart Home
    Assistant. For a manual installation, delete the
    `custom_components/fluentpet` folder and restart Home Assistant.
+3. Optional: remove the FluentPet Connect application credential under
+   **Settings > Devices & services > Application credentials**.
 
 What deleting the entry removes, and what to do when FluentPet cannot be
 reached, is in [Removal](docs/troubleshooting.md#removal).

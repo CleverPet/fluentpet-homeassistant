@@ -132,14 +132,15 @@ normalized words and audio ids of Buttons; serial numbers; and email addresses.
 ## Removal
 
 1. Go to **Settings > Devices & services > FluentPet Connect**, open the menu
-   of the household entry and choose **Delete**. This deletes the FluentPet
+   of each household entry and choose **Delete**. This deletes the FluentPet
    webhook endpoint of the household, the Home Assistant Cloud cloudhook, the
    repair issues and the stored feed position.
 2. In HACS, open **FluentPet Connect**, choose **Remove**, and restart Home
    Assistant. For a manual installation, delete the
    `custom_components/fluentpet` folder and restart Home Assistant.
-3. Optional: remove the FluentPet Connect application credential under
-   **Settings > Devices & services > Application credentials**.
+3. Optional: under **Settings > Devices & services > Application
+   credentials**, remove the credential named **FluentPet**, and any other
+   credential you added for FluentPet Connect.
 
 If Home Assistant cannot reach FluentPet during removal, or the sign-in is no
 longer valid, the webhook endpoint stays at FluentPet and a notification says

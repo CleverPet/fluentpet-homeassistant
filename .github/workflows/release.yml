@@ -1,0 +1,159 @@
+name: Release
+
+# Publishes a GitHub release for a vX.Y.Z tag on main, with the changelog
+# section of the version as notes and fluentpet.zip as the asset HACS
+# installs. See docs/releasing.md.
+#
+# A manual run must use the tag itself as the workflow ref (Run workflow, Use
+# workflow from: Tags: vX.Y.Z), so that every job, including the called test
+# and validate workflows and the HACS action, checks the tagged commit.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (vX.Y.Z); run the workflow from this tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  check:
+    name: Check release
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+    steps:
+      - name: Check the workflow ref
+        run: |
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "::error::The workflow ref is $GITHUB_REF, expected refs/tags/$TAG. Run the workflow from the tag (Use workflow from: Tags: $TAG)."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Check the tag, versions and changelog
+        run: python script/release.py check "$TAG"
+      - name: Check the tag is annotated and points at the workflow commit
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          type=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.type)
+          if [ "$type" != "tag" ]; then
+            echo "::error::$TAG is not an annotated tag. Create it with git tag -a."
+            exit 1
+          fi
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if [ "$commit" != "$(git rev-parse "$GITHUB_SHA^{commit}")" ]; then
+            echo "::error::$TAG points at $commit, but the workflow runs for $GITHUB_SHA."
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Check the tagged commit is on main
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
+            echo "::error::The commit of $TAG is not on main."
+            exit 1
+          fi
+      - name: Check no release exists for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if output=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1); then
+            echo "::error::A release for $TAG already exists."
+            exit 1
+          fi
+          case "$output" in
+            *"HTTP 404"*) echo "No release exists for $TAG." ;;
+            *)
+              echo "$output"
+              echo "::error::Could not check for an existing release of $TAG."
+              exit 1
+              ;;
+          esac
+
+  test:
+    name: Test
+    needs: check
+    uses: ./.github/workflows/test.yml
+
+  validate:
+    name: Validate
+    needs: check
+    uses: ./.github/workflows/validate.yml
+
+  release:
+    name: Publish release
+    needs:
+      - check
+      - test
+      - validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - name: Check the checked out commit
+        env:
+          COMMIT: ${{ needs.check.outputs.commit }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$COMMIT" ]; then
+            echo "::error::$TAG no longer points at $COMMIT, the commit that was checked."
+            exit 1
+          fi
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Build fluentpet.zip
+        run: |
+          archive="$RUNNER_TEMP/fluentpet.zip"
+          (
+            cd custom_components/fluentpet
+            zip -r -X -q "$archive" . -x '*__pycache__*' '*.pyc'
+          )
+          entries=$(unzip -Z1 "$archive")
+          if ! grep -qx 'manifest.json' <<< "$entries"; then
+            echo "::error::manifest.json is not at the root of fluentpet.zip."
+            exit 1
+          fi
+          if grep -Eq '(^custom_components/|__pycache__|\.pyc$)' <<< "$entries"; then
+            echo "::error::fluentpet.zip contains unexpected entries."
+            exit 1
+          fi
+          echo "$entries"
+      - name: Write the release notes
+        run: python script/release.py notes "${TAG#v}" --output "$RUNNER_TEMP/notes.md"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" "$RUNNER_TEMP/fluentpet.zip" \
+            --title "${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag \
+            --latest

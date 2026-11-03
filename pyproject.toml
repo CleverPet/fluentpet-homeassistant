@@ -203,7 +203,7 @@ property-decorators = ["propcache.api.cached_property"]
 # Settings follow Home Assistant core's generated mypy.ini (strict section).
 [tool.mypy]
 python_version = "3.14"
-files = ["custom_components/fluentpet"]
+files = ["custom_components/fluentpet", "script"]
 strict = true
 show_error_codes = true
 follow_imports = "normal"

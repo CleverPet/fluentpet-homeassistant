@@ -149,3 +149,6 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
+- Versioned releases: each release is a GitHub release with its changelog
+  section as notes and a `fluentpet.zip` asset, which HACS installs. HACS
+  shows the release version instead of a commit.

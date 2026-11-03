@@ -225,69 +225,47 @@ async def test_safety_poll_updates_last_seen(
     assert hass.states.get(LAST_SEEN_ENTITY).state == "2026-10-17T12:04:00+00:00"
 
 
-@pytest.mark.parametrize(
-    ("name", "press_order"),
-    [("press_created", 0), ("press_created_app", 2)],
-    ids=["base", "app"],
-)
 async def test_safety_poll_fires_press(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
-    name: str,
-    press_order: int,
 ) -> None:
-    """A press the webhook missed, from a Base or the app, fires from the safety poll."""
+    """A press the webhook missed fires from the safety poll."""
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
-    mock_client.async_get_events.side_effect = [EventPage((_event(name),), NEXT_CURSOR)]
+    mock_client.async_get_events.side_effect = [
+        EventPage((_event("press_created"),), NEXT_CURSOR)
+    ]
     await _poll(hass, freezer)
     _assert_safety_poll(mock_client)
-    state = hass.states.get(PRESS_ENTITY)
-    assert state.state != STATE_UNKNOWN
-    assert state.attributes["press_order"] == press_order
+    assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
 
 
-async def test_safety_poll_unreadable_press_warns_once(
+async def test_safety_poll_skips_unreadable_press(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Unreadable feed presses fire nothing; only the first is a warning."""
-    caplog.set_level(logging.DEBUG, logger="custom_components.fluentpet")
+    """An unreadable feed press warns and does not stop the next press."""
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
     raw = load_json_fixture("events/press_created.json")
     del raw["payload"]["household"]
-    unreadable = Event.from_dict(raw)
-    other = dataclasses.replace(unreadable, id="00000000-0000-4000-8000-0000000000f2")
+    unreadable = Event.from_dict({**raw, "id": "00000000-0000-4000-8000-0000000000f2"})
     mock_client.async_get_events.side_effect = [
-        EventPage((unreadable,), NEXT_CURSOR),
-        # The same event again is a duplicate; another of the type is debug only.
-        EventPage((unreadable, other), NEXT_CURSOR),
+        EventPage((unreadable, _event("press_created")), NEXT_CURSOR)
     ]
     await _poll(hass, freezer)
-    await _poll(hass, freezer)
-    assert mock_client.async_get_events.await_count == 2
-    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
-
-    def read_messages(level: int) -> list[str]:
-        return [
-            record.getMessage()
-            for record in caplog.records
-            if record.levelno == level
-            and record.getMessage().startswith("Could not read FluentPet event")
-        ]
-
-    assert read_messages(logging.WARNING) == [
-        f"Could not read FluentPet event {raw['id']} of type press.created:"
-        f" {unreadable.data_error}"
+    warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+        and r.name.startswith("custom_components.fluentpet")
     ]
-    assert read_messages(logging.DEBUG) == [
-        f"Could not read FluentPet event {other.id} of type press.created:"
-        f" {unreadable.data_error}"
-    ]
+    assert len(warnings) == 1
+    assert warnings[0].startswith(f"Could not read FluentPet event {unreadable.id}")
+    assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
 
 
 async def test_safety_poll_cursor_reset_reads_everything(

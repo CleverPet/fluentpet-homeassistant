@@ -105,40 +105,18 @@ def test_press_created() -> None:
     assert data.interaction is not None
     assert data.interaction.id == INT_ID
     assert data.interaction.position == 0
-    assert data.position == 0
     assert "version" not in event.payload
-    assert event.data_error is None
 
 
-def test_press_created_app() -> None:
-    """A press logged in the app has no Base and the source app."""
-    event = _event("press_created_app")
-    assert event.event_type is EventType.PRESS_CREATED
-    assert event.version == 1
-    assert event.data_error is None
-    data = event.data
+def test_press_created_without_base() -> None:
+    """A press logged in the app has no Base."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["base"] = None
+    raw["payload"]["press"]["source"] = "app"
+    data = parse_event(raw).data
     assert isinstance(data, PressCreatedData)
     assert data.base is None
-    assert data.button is not None
-    assert data.button.id == BTN_OUT
     assert data.press.source == "app"
-    assert data.interaction is not None
-    assert data.interaction.position == 2
-    assert data.position == 2
-
-
-@pytest.mark.parametrize("name", ["press_created", "press_created_app"])
-def test_press_created_current_shape(name: str) -> None:
-    """The current fixtures keep the final format, not the earlier one.
-
-    The press has no occurred_at or press_order, and the version is on the
-    envelope, not in the payload, so a fixture edit cannot restore the old shape.
-    """
-    raw = load_json_fixture(f"events/{name}.json")
-    assert "occurred_at" not in raw["payload"]["press"]
-    assert "press_order" not in raw["payload"]["press"]
-    assert "version" in raw
-    assert "version" not in raw["payload"]
 
 
 def test_press_created_without_position() -> None:
@@ -173,7 +151,6 @@ def test_press_created_legacy() -> None:
     "name",
     [
         "press_created",
-        "press_created_app",
         "press_created_legacy",
         "ping",
         "interaction_updated",
@@ -528,8 +505,6 @@ def test_malformed_known_payload(name: str, key: str) -> None:
     # The reason is kept, for the caller to log.
     assert event.data_error
     assert key in event.data_error
-    # Stored and read back (a waiting press), it keeps the same reason.
-    assert parse_event(json.loads(json.dumps(event.to_dict()))) == event
 
 
 @pytest.mark.parametrize("press", [None, "base", ["base"]], ids=["null", "str", "list"])

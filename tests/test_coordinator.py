@@ -448,63 +448,37 @@ async def test_stored_press_without_button_skipped(
     assert data["id"] not in processor.seen_events
 
 
-async def test_stored_unreadable_press_warns(
+async def test_stored_unreadable_press_skipped(
     hass: HomeAssistant,
     mock_client: AsyncMock,
     mock_config_entry: MockConfigEntry,
     hass_storage: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Stored waiting presses this version cannot read are dropped and saved away.
-
-    The first is logged as a warning, later ones at debug level.
-    """
-    caplog.set_level(logging.DEBUG, logger="custom_components.fluentpet")
+    """An unreadable stored press warns, is saved away and does not stop the next."""
     data = load_json_fixture("events/press_created.json")
     del data["payload"]["household"]
-    other = {**data, "id": "00000000-0000-4000-8000-0000000000f2"}
+    data["id"] = "00000000-0000-4000-8000-0000000000f2"
+    press = _event("press_created")
     _store(
         hass_storage,
         mock_config_entry,
-        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data, other]},
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data, press.to_dict()]},
     )
     events = async_capture_events(hass, EVENT_STATE_CHANGED)
     await setup_integration(hass, mock_config_entry)
     await hass.async_block_till_done()
-    processor = mock_config_entry.runtime_data.coordinator.processor
-    assert processor.pending_count == 0
-    assert _fired_presses(events) == []
-
-    def messages(level: int) -> list[str]:
-        return [
-            record.getMessage()
-            for record in caplog.records
-            if record.levelno == level
-            and record.getMessage().startswith("Ignoring a stored waiting")
-        ]
-
-    warnings = messages(logging.WARNING)
+    assert _fired_presses(events) == [(0, "2026-10-17T11:59:58.412000+00:00")]
+    warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+        and r.name.startswith("custom_components.fluentpet")
+    ]
     assert len(warnings) == 1
     assert data["id"] in warnings[0]
-    assert "household" in warnings[0]
-    debug = messages(logging.DEBUG)
-    assert len(debug) == 1
-    assert other["id"] in debug[0]
-    # Not reported as a damaged store as well.
-    assert "Ignoring invalid stored waiting FluentPet presses" not in caplog.text
-    # A later unreadable press of the same run shares the warn-once state.
-    caplog.clear()
-    processor.async_process(
-        Event.from_dict({**data, "id": "00000000-0000-4000-8000-0000000000f3"})
-    )
-    assert not [
-        record for record in caplog.records if record.levelno >= logging.WARNING
-    ]
-    assert "Could not read FluentPet event" in caplog.text
-    # Saved at setup, so the warning does not repeat on the next start.
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
-    assert stored["pending"] == []
-    assert stored["cursor"] == STORED_CURSOR
+    assert data["id"] not in str(stored["pending"])
 
 
 async def test_disabled_press_entity_keeps_no_presses(

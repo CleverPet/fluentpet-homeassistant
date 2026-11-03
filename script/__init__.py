@@ -1,1 +1,1 @@
-"""Maintenance scripts for the FluentPet Connect repository."""
+"""Maintenance scripts for the FluentPet Connect Home Assistant integration."""

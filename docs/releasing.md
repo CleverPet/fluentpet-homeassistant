@@ -1,7 +1,8 @@
 # Releasing
 
-How changes reach `main` and how a release is made. For the development setup
-and checks, see [Development](development.md).
+How changes reach `main` and how a release of this Home Assistant integration
+is made. For the development setup and checks, see
+[Development](development.md).
 
 ## Branches and pull requests
 
@@ -59,13 +60,14 @@ kept in two files, which must both equal `X.Y.Z` in the released commit:
    git push origin vX.Y.Z
    ```
 
-4. The push starts the `Release` workflow
+4. The push starts the `Release Home Assistant integration` workflow
    (`.github/workflows/release.yml`). It publishes the GitHub release; do not
    create one by hand.
 
 ### What the release workflow does
 
-The job `Check release` checks out the tag and stops the release when:
+The job `Check integration release` checks out the tag and stops the release
+when:
 
 - the tag is not of the form `vX.Y.Z`;
 - the manifest or `pyproject.toml` version is not `X.Y.Z`;
@@ -76,7 +78,7 @@ The job `Check release` checks out the tag and stops the release when:
 
 The workflow then runs the `Test` (`Lint, types and tests`) and `Validate`
 (`Hassfest`, `HACS`) workflows on the tagged commit. When all of them pass,
-the job `Publish release`:
+the job `Publish integration release`:
 
 1. builds `fluentpet.zip` with the contents of `custom_components/fluentpet`
    at the root of the archive (`manifest.json` at the top level, without
@@ -84,8 +86,9 @@ the job `Publish release`:
 2. writes the `## X.Y.Z` section of `CHANGELOG.md` as the release notes;
 3. stops when a release for the tag already exists, draft releases
    included;
-4. creates the GitHub release `X.Y.Z` for the tag, with those notes and the
-   `fluentpet.zip` asset, marked as the latest release.
+4. creates the GitHub release
+   `FluentPet Connect Home Assistant integration vX.Y.Z` for the tag, with
+   those notes and the `fluentpet.zip` asset, marked as the latest release.
 
 The workflow publishes the release; it does not leave a draft, because HACS
 sees no asset on a draft release. `gh release create` first creates a draft,
@@ -96,16 +99,17 @@ uploads `fluentpet.zip` to it, and then publishes it.
 After a transient failure, **Re-run failed jobs** on the run of the tag push
 works, because the re-run keeps the tag as its ref.
 
-To start a new run for an existing tag, open **Actions > Release > Run workflow**, choose **Use workflow
-from: Tags: vX.Y.Z**, and enter `vX.Y.Z` as the tag. The workflow refuses to
-run from a branch, so every job checks the tagged commit. It also refuses
-when a release for the tag already exists.
+To start a new run for an existing tag, open
+**Actions > Release Home Assistant integration > Run workflow**, choose
+**Use workflow from: Tags: vX.Y.Z**, and enter `vX.Y.Z` as the tag. The
+workflow refuses to run from a branch, so every job checks the tagged commit.
+It also refuses when a release for the tag already exists.
 
 ### A failed release
 
 The release is only created in the last step, so a run that fails before the
-`Publish release` job leaves no release. To fix the cause and release the same
-version:
+`Publish integration release` job leaves no release. To fix the cause and
+release the same version:
 
 1. Merge the fix into `main`, through a pull request as usual.
 2. Delete the tag locally and on GitHub, then tag the new commit and push the
@@ -120,10 +124,10 @@ version:
    git push origin vX.Y.Z
    ```
 
-A failure inside the `Publish release` job, while uploading the asset or
-publishing the release, can leave a draft release for the tag. Delete the
-draft (`gh release delete vX.Y.Z`, or on the Releases page) before running the
-workflow again; the workflow refuses to run while it exists.
+A failure inside the `Publish integration release` job, while uploading the
+asset or publishing the release, can leave a draft release for the tag. Delete
+the draft (`gh release delete vX.Y.Z`, or on the Releases page) before running
+the workflow again; the workflow refuses to run while it exists.
 
 Once a release is published, do not move or delete its tag; release a new
 version instead.

@@ -1,4 +1,4 @@
-"""Release checks and release notes for FluentPet Connect.
+"""Release checks and notes for the FluentPet Connect Home Assistant integration.
 
 Usage:
     python script/release.py check vX.Y.Z
@@ -231,7 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="release.py",
-        description="Release checks and release notes for FluentPet Connect.",
+        description=(
+            "Release checks and release notes for the FluentPet Connect Home"
+            " Assistant integration."
+        ),
     )
     parser.add_argument(
         "--root",

@@ -1,8 +1,8 @@
-name: Release
+name: Release Home Assistant integration
 
-# Publishes a GitHub release for a vX.Y.Z tag on main, with the changelog
-# section of the version as notes and fluentpet.zip as the asset. See
-# docs/releasing.md.
+# Publishes a GitHub release of the FluentPet Connect Home Assistant
+# integration for a vX.Y.Z tag on main, with the changelog section of the
+# version as notes and fluentpet.zip as the asset. See docs/releasing.md.
 #
 # A manual run must use the tag itself as the workflow ref (Run workflow, Use
 # workflow from: Tags: vX.Y.Z), so that every job, including the called test
@@ -31,7 +31,7 @@ env:
 
 jobs:
   check:
-    name: Check release
+    name: Check integration release
     runs-on: ubuntu-latest
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
@@ -104,7 +104,7 @@ jobs:
     uses: ./.github/workflows/validate.yml
 
   release:
-    name: Publish release
+    name: Publish integration release
     needs:
       - check
       - test
@@ -164,7 +164,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$TAG" "$RUNNER_TEMP/fluentpet.zip" \
-            --title "${TAG#v}" \
+            --title "FluentPet Connect Home Assistant integration $TAG" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             --verify-tag \
             --latest

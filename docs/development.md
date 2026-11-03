@@ -39,8 +39,10 @@ The lint, type and test checks run in `.github/workflows/test.yml` as the job
 `Lint, types and tests`, on the same triggers. `mypy` checks the integration
 and `script`.
 
-The release workflow, `.github/workflows/release.yml`, runs on a `vX.Y.Z` tag
-and calls both workflows on the tagged commit before it publishes the release.
+The `Release Home Assistant integration` workflow,
+`.github/workflows/release.yml`, runs on a `vX.Y.Z` tag and calls both
+workflows on the tagged commit before it publishes the release of this Home
+Assistant integration.
 `script/release.py` holds its version and changelog checks; its tests are in
 `tests/test_release_script.py`. See [Releasing](releasing.md#making-a-release).
 

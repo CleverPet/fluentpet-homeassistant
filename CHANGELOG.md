@@ -149,5 +149,7 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
-- Release workflow: a `vX.Y.Z` tag on `main` publishes a GitHub release with
-  the changelog section of the version as notes and a `fluentpet.zip` asset.
+- Release workflow: a `vX.Y.Z` tag on `main` publishes a GitHub release of the
+  FluentPet Connect Home Assistant integration, titled
+  `FluentPet Connect Home Assistant integration vX.Y.Z`, with the changelog
+  section of the version as notes and a `fluentpet.zip` asset.

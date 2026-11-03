@@ -149,6 +149,11 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
+- A FluentPet event that this version cannot read, such as after a change of
+  the event format, is now logged as a warning (once per event type until
+  Home Assistant restarts or the integration reloads) instead of being
+  ignored silently. This includes presses stored while their button was not
+  yet set up.
 - Release workflow: a `vX.Y.Z` tag on `main` publishes a GitHub release of the
   FluentPet Connect Home Assistant integration, titled
   `FluentPet Connect Home Assistant integration vX.Y.Z`, with the changelog

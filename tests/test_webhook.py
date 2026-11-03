@@ -56,7 +56,13 @@ from homeassistant.helpers.update_coordinator import REQUEST_REFRESH_DEFAULT_COO
 from homeassistant.util import dt as dt_util
 from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
 
-from .common import SECRET, load_json_fixture, setup_integration, signed_headers
+from .common import (
+    SECRET,
+    integration_warnings,
+    load_json_fixture,
+    setup_integration,
+    signed_headers,
+)
 from .conftest import (
     CLOUDHOOK_URL,
     EXTERNAL_URL,
@@ -613,6 +619,35 @@ async def test_press_delivery_without_press_details(
     assert state.state != STATE_UNKNOWN
     assert state.attributes["press_order"] == 0
     assert state.attributes["occurred_at"] == "2026-10-17T11:59:58.412000+00:00"
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_unreadable_press_delivery_skipped(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unreadable press warns once, fires nothing and does not stop later presses."""
+    await setup_integration(hass, registered_entry)
+    for index, event_id in enumerate(("unreadable-1", "unreadable-2")):
+        data = json.loads(_body("press_created", id=event_id))
+        del data["payload"]["household"]
+        body = json.dumps(data).encode()
+        headers = signed_headers(
+            body, delivery=f"00000000-0000-4000-8000-00000000d10{index}"
+        )
+        assert await _post(hass_client_no_auth, body, headers) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    warnings = integration_warnings(caplog)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Could not read FluentPet event unreadable-1")
+    body = _body("press_created")
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+    assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
 
 
 @pytest.mark.usefixtures("external_url")

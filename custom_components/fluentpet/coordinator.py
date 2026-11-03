@@ -41,6 +41,7 @@ from .fluentpet_api import (
     Base,
     Button,
     Event,
+    EventType,
     FluentPetAuthError,
     FluentPetClient,
     FluentPetError,
@@ -105,6 +106,13 @@ def not_admin_issue_id(entry_id: str) -> str:
 def base_device_name(base: Base) -> str:
     """Return the device name of a Base."""
     return base.name or f"Base {base.serial}"
+
+
+def _is_press(event: Event) -> bool:
+    """Return whether an event is a press, including one this version cannot read."""
+    return isinstance(event.data, PressCreatedData) or (
+        event.data is None and event.event_type is EventType.PRESS_CREATED
+    )
 
 
 class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
@@ -266,7 +274,10 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 self.config_entry.title,
             )
             repaired = True
-        self.processor.async_restore_pending(pending)
+        if self.processor.async_restore_pending(pending):
+            # A press this version cannot read was dropped; it was logged on its
+            # own, so it is saved away without the damaged-store warning.
+            repaired = True
         cursor = stored.get("cursor", ...)
         if cursor is not None and not isinstance(cursor, str):
             LOGGER.warning(
@@ -283,6 +294,8 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         """Return the stored presses that waited for their button entity.
 
         Returns the presses that parse and whether all stored entries were valid.
+        A press whose payload this version cannot read is returned, for
+        async_restore_pending to warn about, and is not counted as a damaged store.
         """
         if not isinstance(stored, list):
             return [], False
@@ -293,7 +306,7 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 event = Event.from_dict(item) if isinstance(item, dict) else None
             except FluentPetParseError:
                 event = None
-            if event is None or not isinstance(event.data, PressCreatedData):
+            if event is None or not _is_press(event):
                 valid = False
                 continue
             events.append(event)

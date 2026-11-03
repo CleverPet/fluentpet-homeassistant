@@ -792,6 +792,8 @@ class Event:
         payload: The raw payload.
         data: The typed payload, or None for an unknown type or a payload that does not match
             its type's shape (the raw payload is still in `payload`).
+        data_error: Why `data` is None for a known type: the parse error of its payload. None
+            when `data` is set or the type is unknown.
     """
 
     id: str
@@ -801,6 +803,7 @@ class Event:
     version: int
     payload: JsonObject = field(repr=False)
     data: EventData | None
+    data_error: str | None = None
 
     @property
     def event_type(self) -> EventType | None:
@@ -837,10 +840,13 @@ class Event:
         """
         event_type = _str(data, "type")
         payload = _object(data.get("payload"), "payload")
+        data_error: str | None = None
         try:
             typed = _event_data(event_type, payload)
-        except FluentPetParseError:
+        except FluentPetParseError as err:
+            # Kept, so the caller can say why an event of a known type is not used.
             typed = None
+            data_error = str(err)
         version = _opt_int(data, "version")
         if version is None:
             # Events stored before the format change carry the version in the
@@ -854,6 +860,7 @@ class Event:
             version=1 if version is None else version,
             payload=payload,
             data=typed,
+            data_error=data_error,
         )
 
 

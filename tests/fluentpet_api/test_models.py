@@ -108,6 +108,17 @@ def test_press_created() -> None:
     assert "version" not in event.payload
 
 
+def test_press_created_without_base() -> None:
+    """A press logged in the app has no Base."""
+    raw = load_json_fixture("events/press_created.json")
+    raw["payload"]["base"] = None
+    raw["payload"]["press"]["source"] = "app"
+    data = parse_event(raw).data
+    assert isinstance(data, PressCreatedData)
+    assert data.base is None
+    assert data.press.source == "app"
+
+
 def test_press_created_without_position() -> None:
     """An interaction without a position has position None."""
     raw = load_json_fixture("events/press_created.json")
@@ -469,6 +480,7 @@ def test_unknown_event_type() -> None:
     assert event.type == "learner.celebrated"
     assert event.event_type is None
     assert event.data is None
+    assert event.data_error is None
     assert event.household is None
     assert event.payload["household"]["id"] == HH
 
@@ -490,6 +502,9 @@ def test_malformed_known_payload(name: str, key: str) -> None:
     event = parse_event(raw)
     assert event.data is None
     assert event.event_type is not None
+    # The reason is kept, for the caller to log.
+    assert event.data_error
+    assert key in event.data_error
 
 
 @pytest.mark.parametrize("press", [None, "base", ["base"]], ids=["null", "str", "list"])

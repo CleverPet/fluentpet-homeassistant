@@ -42,7 +42,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
-from .common import load_json_fixture, setup_integration
+from .common import integration_warnings, load_json_fixture, setup_integration
 from .conftest import HOUSEHOLD_ID, TAIL_CURSOR, buttons, empty_page
 
 PRESS_ENTITY = "event.outside_press"
@@ -446,6 +446,40 @@ async def test_stored_press_without_button_skipped(
     processor = mock_config_entry.runtime_data.coordinator.processor
     assert processor.pending_count == 0
     assert data["id"] not in processor.seen_events
+
+
+async def test_stored_unreadable_press_skipped(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unreadable stored press warns and is saved away at setup.
+
+    The next press stays queued, as its button entity never becomes ready, so
+    only the setup save can remove the unreadable press from the store.
+    """
+    data = load_json_fixture("events/press_created.json")
+    del data["payload"]["household"]
+    data["id"] = "00000000-0000-4000-8000-0000000000f2"
+    press = _event("press_created")
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data, press.to_dict()]},
+    )
+    with patch.object(
+        FluentPetEventProcessor, "async_button_ready", lambda *_: lambda: None
+    ):
+        await setup_integration(hass, mock_config_entry)
+        await hass.async_block_till_done()
+    warnings = integration_warnings(caplog)
+    assert len(warnings) == 1
+    assert data["id"] in warnings[0]
+    pending = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]["pending"]
+    assert [stored["id"] for stored in pending] == [press.id]
+    assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 1
 
 
 async def test_disabled_press_entity_keeps_no_presses(

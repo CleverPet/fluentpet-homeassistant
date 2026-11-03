@@ -28,6 +28,7 @@
           "button_id": "btn_testbuttonoutsideaaaaaaaaa",
           "name": "Outside",
           "normalized_word": "outside",
+          "inaudible": false,
           "occurred_at": "2026-10-17T11:59:58.412Z",
           "press_order": 0
         },
@@ -35,6 +36,7 @@
           "button_id": "btn_testbuttonplayaaaaaaaaaaaa",
           "name": "Play",
           "normalized_word": "play",
+          "inaudible": false,
           "occurred_at": "2026-10-17T12:00:03.020Z",
           "press_order": 1
         },
@@ -42,6 +44,7 @@
           "button_id": "btn_testbuttonwalkaaaaaaaaaaaa",
           "name": null,
           "normalized_word": null,
+          "inaudible": false,
           "occurred_at": "2026-10-17T12:00:05.500Z",
           "press_order": 2
         }

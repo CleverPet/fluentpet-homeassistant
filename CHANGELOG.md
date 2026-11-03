@@ -154,3 +154,7 @@ All notable changes to this project are documented in this file.
   Home Assistant restarts or the integration reloads) instead of being
   ignored silently. This includes presses stored while their button was not
   yet set up.
+- Release workflow: a `vX.Y.Z` tag on `main` publishes a GitHub release of the
+  FluentPet Connect Home Assistant integration, titled
+  `FluentPet Connect Home Assistant integration vX.Y.Z`, with the changelog
+  section of the version as notes and a `fluentpet.zip` asset.

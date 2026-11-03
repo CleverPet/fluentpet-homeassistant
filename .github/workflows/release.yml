@@ -1,8 +1,8 @@
 name: Release
 
 # Publishes a GitHub release for a vX.Y.Z tag on main, with the changelog
-# section of the version as notes and fluentpet.zip as the asset HACS
-# installs. See docs/releasing.md.
+# section of the version as notes and fluentpet.zip as the asset. See
+# docs/releasing.md.
 #
 # A manual run must use the tag itself as the workflow ref (Run workflow, Use
 # workflow from: Tags: vX.Y.Z), so that every job, including the called test
@@ -125,9 +125,6 @@ jobs:
             echo "::error::$TAG no longer points at $COMMIT, the commit that was checked."
             exit 1
           fi
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
       - name: Build fluentpet.zip
         run: |
           archive="$RUNNER_TEMP/fluentpet.zip"
@@ -145,8 +142,22 @@ jobs:
             exit 1
           fi
           echo "$entries"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
       - name: Write the release notes
         run: python script/release.py notes "${TAG#v}" --output "$RUNNER_TEMP/notes.md"
+      - name: Check no release or draft exists for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GET releases/tags/{tag} does not return drafts, so list every
+          # release, drafts included. This job can read drafts.
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
+          if grep -Fqx -- "$TAG" <<< "$tags"; then
+            echo "::error::A release or draft release for $TAG already exists. Delete it (gh release delete $TAG) before running the workflow again."
+            exit 1
+          fi
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}

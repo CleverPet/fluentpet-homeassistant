@@ -11,6 +11,7 @@ from script.release import (
     changelog_section,
     check_release,
     main,
+    validate_version,
     version_from_tag,
 )
 
@@ -89,6 +90,7 @@ def test_version_from_valid_tag(tag: str, version: str) -> None:
         "V1.2.3",
         " v1.2.3",
         "v1.2.3\n",
+        "v1\u0662.0.0",
         "",
     ],
 )
@@ -96,6 +98,12 @@ def test_malformed_tag(tag: str) -> None:
     """A tag that is not vX.Y.Z is refused."""
     with pytest.raises(ReleaseError, match="not of the form vX.Y.Z"):
         version_from_tag(tag)
+
+
+def test_non_ascii_digit_version() -> None:
+    """A version with a non-ASCII digit is refused."""
+    with pytest.raises(ReleaseError, match="not of the form X.Y.Z"):
+        validate_version("1\u0662.0.0")
 
 
 def test_check_release_ok(tmp_path: Path) -> None:
@@ -257,3 +265,26 @@ def test_main_missing_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     """A missing release file fails with an error instead of a traceback."""
     assert main(["--root", str(tmp_path), "check", "v1.2.3"]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+CRLF_CHANGELOG = (
+    "# Changelog\r\n\r\n## Unreleased\r\n\r\n- Upcoming change.\r\n\r\n"
+    "## 1.2.3  \r\n\r\n- Added a sensor.\r\n- Fixed a crash.\r\n\r\n"
+    "## 1.2.2\r\n\r\n- Older change.\r\n"
+)
+
+
+def test_changelog_section_crlf() -> None:
+    """A changelog with CRLF line endings and a trailing-space heading works."""
+    assert changelog_section(CRLF_CHANGELOG, "1.2.3") == (
+        "- Added a sensor.\n- Fixed a crash."
+    )
+    assert changelog_section(CRLF_CHANGELOG, "1.2.2") == "- Older change."
+
+
+def test_check_release_crlf(tmp_path: Path) -> None:
+    """The check accepts a changelog file with CRLF line endings."""
+    paths = write_repo(tmp_path)
+    paths.changelog.write_bytes(CRLF_CHANGELOG.encode("utf-8"))
+    assert b"\r\n## 1.2.3  \r\n" in paths.changelog.read_bytes()
+    assert check_release("v1.2.3", paths) == "1.2.3"

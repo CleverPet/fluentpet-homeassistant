@@ -1,8 +1,5 @@
 {
   "name": "FluentPet Connect",
   "homeassistant": "2026.10.0",
-  "render_readme": true,
-  "zip_release": true,
-  "filename": "fluentpet.zip",
-  "hide_default_branch": true
+  "render_readme": true
 }

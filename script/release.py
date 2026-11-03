@@ -10,8 +10,10 @@ Usage:
 changelog section of a version, for use as the GitHub release notes.
 
 A version section in ``CHANGELOG.md`` starts with a heading line that is
-exactly ``## X.Y.Z`` and ends at the next ``## `` heading or the end of the
-file. The script uses the standard library only.
+exactly ``## X.Y.Z`` and ends at the next line that starts with ``## `` or
+the end of the file. Any such line ends the section, including one inside a
+fenced code block, so changelog entries must not contain a line that starts
+with ``## ``. The script uses the standard library only.
 """
 
 import argparse
@@ -25,8 +27,8 @@ import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-TAG_PATTERN = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-VERSION_PATTERN = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
+TAG_PATTERN = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
 class ReleaseError(Exception):
@@ -154,7 +156,8 @@ def changelog_section(text: str, version: str) -> str:
     """Return the body of the changelog section of a version.
 
     The section starts after the line ``## <version>`` and ends before the next
-    line that starts with ``## `` or at the end of the text.
+    line that starts with ``## `` or at the end of the text. A line that starts
+    with ``## `` inside a fenced code block also ends the section.
 
     Args:
         text: The content of ``CHANGELOG.md``.

@@ -492,6 +492,15 @@ async def test_stored_unreadable_press_warns(
     assert other["id"] in debug[0]
     # Not reported as a damaged store as well.
     assert "Ignoring invalid stored waiting FluentPet presses" not in caplog.text
+    # A later unreadable press of the same run shares the warn-once state.
+    caplog.clear()
+    processor.async_process(
+        Event.from_dict({**data, "id": "00000000-0000-4000-8000-0000000000f3"})
+    )
+    assert not [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert "Could not read FluentPet event" in caplog.text
     # Saved at setup, so the warning does not repeat on the next start.
     stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
     assert stored["pending"] == []

@@ -118,8 +118,9 @@ class FluentPetEventProcessor:
         They count as processed and fire as replayed once their entity is ready;
         a press of a button still unknown after the next refresh is dropped, as
         is a press of a button whose press entity is disabled, and a repeated id.
-        A press whose payload this version cannot read is dropped: the first is
-        logged as a warning, later ones at debug level.
+        A press whose payload this version cannot read is dropped: the first
+        unreadable press.created of this run, stored or new, is logged as a
+        warning, later ones at debug level.
 
         Returns whether a press that this version cannot read was dropped, so
         the caller saves the store without it.
@@ -129,9 +130,13 @@ class FluentPetEventProcessor:
         for event in events:
             data = event.data
             if data is None and event.event_type is EventType.PRESS_CREATED:
-                # Stored by a version that could read it; this one cannot.
+                # Stored by a version that could read it; this one cannot. It
+                # shares the warn-once state of async_process, so a later
+                # unreadable press of this run is logged at debug level.
+                first = event.type not in self._unreadable_types
+                self._unreadable_types.add(event.type)
                 LOGGER.log(
-                    logging.DEBUG if dropped else logging.WARNING,
+                    logging.WARNING if first else logging.DEBUG,
                     "Ignoring a stored waiting FluentPet press %s that this version"
                     " cannot read: %s",
                     event.id,

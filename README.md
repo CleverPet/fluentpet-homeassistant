@@ -61,6 +61,11 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
    folder (create it if missing) of your Home Assistant configuration folder.
 3. Restart Home Assistant.
 
+The FluentPet Connect icon ships with the integration. On Home Assistant
+2026.10 or newer it appears under **Settings > Devices & services** after the
+restart. The HACS 2.0.5 dashboard shows a placeholder icon until Home Assistant
+2026.11 ships the Marketplace integration.
+
 ## Setup
 
 ### Application credential

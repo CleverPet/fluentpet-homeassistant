@@ -6,10 +6,6 @@ an event entity when a learner or teacher presses a Button, shows the words of
 the latest interaction, and shows when each Base last reported, whether it is
 plugged in, and the battery level of each Base and Button.
 
-> **Status: pre-release.** The FluentPet API endpoints this integration uses
-> ship with an upcoming FluentPet backend release; until then sign-in fails
-> against the FluentPet API. The first release follows that backend release.
-
 ## What it does
 
 - Signs in with your FluentPet account through OAuth2 (`auth.fluent.pet`), from

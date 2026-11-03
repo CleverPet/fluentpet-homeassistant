@@ -31,7 +31,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
-from .common import load_json_fixture, setup_integration
+from .common import integration_warnings, load_json_fixture, setup_integration
 from .conftest import HOUSEHOLD_ID, TAIL_CURSOR, bases, buttons, empty_page, webhook
 
 pytestmark = pytest.mark.usefixtures("external_url")
@@ -237,6 +237,28 @@ async def test_safety_poll_fires_press(
     ]
     await _poll(hass, freezer)
     _assert_safety_poll(mock_client)
+    assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
+
+
+async def test_safety_poll_skips_unreadable_press(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unreadable feed press warns and does not stop the next press."""
+    await _setup_push(hass, freezer, mock_client, mock_config_entry)
+    raw = load_json_fixture("events/press_created.json")
+    del raw["payload"]["household"]
+    unreadable = Event.from_dict({**raw, "id": "00000000-0000-4000-8000-0000000000f2"})
+    mock_client.async_get_events.side_effect = [
+        EventPage((unreadable, _event("press_created")), NEXT_CURSOR)
+    ]
+    await _poll(hass, freezer)
+    warnings = integration_warnings(caplog)
+    assert len(warnings) == 1
+    assert warnings[0].startswith(f"Could not read FluentPet event {unreadable.id}")
     assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN
 
 

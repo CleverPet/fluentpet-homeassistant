@@ -1,10 +1,12 @@
 """Helpers shared by the FluentPet tests."""
 
 import json
+import logging
 from pathlib import Path
 import time
 from typing import Any
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.fluentpet.fluentpet_api import (
@@ -24,6 +26,16 @@ SECRET = "whsec_" + "0" * 64
 def load_json_fixture(name: str) -> Any:
     """Return the parsed JSON of tests/fixtures/<name>."""
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def integration_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the messages the integration logged at warning level or higher."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+        and record.name.startswith("custom_components.fluentpet")
+    ]
 
 
 async def setup_integration(hass: HomeAssistant, entry: MockConfigEntry) -> None:

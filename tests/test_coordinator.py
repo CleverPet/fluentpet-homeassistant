@@ -42,7 +42,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
-from .common import load_json_fixture, setup_integration
+from .common import integration_warnings, load_json_fixture, setup_integration
 from .conftest import HOUSEHOLD_ID, TAIL_CURSOR, buttons, empty_page
 
 PRESS_ENTITY = "event.outside_press"
@@ -455,7 +455,11 @@ async def test_stored_unreadable_press_skipped(
     hass_storage: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """An unreadable stored press warns, is saved away and does not stop the next."""
+    """An unreadable stored press warns and is saved away at setup.
+
+    The next press stays queued, as its button entity never becomes ready, so
+    only the setup save can remove the unreadable press from the store.
+    """
     data = load_json_fixture("events/press_created.json")
     del data["payload"]["household"]
     data["id"] = "00000000-0000-4000-8000-0000000000f2"
@@ -465,20 +469,17 @@ async def test_stored_unreadable_press_skipped(
         mock_config_entry,
         {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data, press.to_dict()]},
     )
-    events = async_capture_events(hass, EVENT_STATE_CHANGED)
-    await setup_integration(hass, mock_config_entry)
-    await hass.async_block_till_done()
-    assert _fired_presses(events) == [(0, "2026-10-17T11:59:58.412000+00:00")]
-    warnings = [
-        r.getMessage()
-        for r in caplog.records
-        if r.levelno == logging.WARNING
-        and r.name.startswith("custom_components.fluentpet")
-    ]
+    with patch.object(
+        FluentPetEventProcessor, "async_button_ready", lambda *_: lambda: None
+    ):
+        await setup_integration(hass, mock_config_entry)
+        await hass.async_block_till_done()
+    warnings = integration_warnings(caplog)
     assert len(warnings) == 1
     assert data["id"] in warnings[0]
-    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
-    assert data["id"] not in str(stored["pending"])
+    pending = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]["pending"]
+    assert [stored["id"] for stored in pending] == [press.id]
+    assert mock_config_entry.runtime_data.coordinator.processor.pending_count == 1
 
 
 async def test_disabled_press_entity_keeps_no_presses(

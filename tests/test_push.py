@@ -3,7 +3,6 @@
 from collections.abc import Callable
 import dataclasses
 from datetime import datetime, timedelta
-import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -32,7 +31,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
-from .common import load_json_fixture, setup_integration
+from .common import integration_warnings, load_json_fixture, setup_integration
 from .conftest import HOUSEHOLD_ID, TAIL_CURSOR, bases, buttons, empty_page, webhook
 
 pytestmark = pytest.mark.usefixtures("external_url")
@@ -257,12 +256,7 @@ async def test_safety_poll_skips_unreadable_press(
         EventPage((unreadable, _event("press_created")), NEXT_CURSOR)
     ]
     await _poll(hass, freezer)
-    warnings = [
-        r.getMessage()
-        for r in caplog.records
-        if r.levelno == logging.WARNING
-        and r.name.startswith("custom_components.fluentpet")
-    ]
+    warnings = integration_warnings(caplog)
     assert len(warnings) == 1
     assert warnings[0].startswith(f"Could not read FluentPet event {unreadable.id}")
     assert hass.states.get(PRESS_ENTITY).state != STATE_UNKNOWN

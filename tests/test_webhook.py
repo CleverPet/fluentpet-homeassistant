@@ -4,7 +4,6 @@ import copy
 from dataclasses import replace
 from datetime import timedelta
 import json
-import logging
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -57,7 +56,13 @@ from homeassistant.helpers.update_coordinator import REQUEST_REFRESH_DEFAULT_COO
 from homeassistant.util import dt as dt_util
 from homeassistant.util.aiohttp import MockRequest, MockStreamReader, serialize_response
 
-from .common import SECRET, load_json_fixture, setup_integration, signed_headers
+from .common import (
+    SECRET,
+    integration_warnings,
+    load_json_fixture,
+    setup_integration,
+    signed_headers,
+)
 from .conftest import (
     CLOUDHOOK_URL,
     EXTERNAL_URL,
@@ -636,12 +641,7 @@ async def test_unreadable_press_delivery_skipped(
         assert await _post(hass_client_no_auth, body, headers) == 200
     await hass.async_block_till_done()
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
-    warnings = [
-        r.getMessage()
-        for r in caplog.records
-        if r.levelno == logging.WARNING
-        and r.name.startswith("custom_components.fluentpet")
-    ]
+    warnings = integration_warnings(caplog)
     assert len(warnings) == 1
     assert warnings[0].startswith("Could not read FluentPet event unreadable-1")
     body = _body("press_created")

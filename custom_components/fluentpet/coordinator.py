@@ -41,6 +41,7 @@ from .fluentpet_api import (
     Base,
     Button,
     Event,
+    EventType,
     FluentPetAuthError,
     FluentPetClient,
     FluentPetError,
@@ -283,6 +284,8 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
         """Return the stored presses that waited for their button entity.
 
         Returns the presses that parse and whether all stored entries were valid.
+        A press whose payload this version cannot read counts as valid and is
+        returned, for async_restore_pending to warn about.
         """
         if not isinstance(stored, list):
             return [], False
@@ -293,7 +296,14 @@ class FluentPetCoordinator(DataUpdateCoordinator[FluentPetHouseholdData]):
                 event = Event.from_dict(item) if isinstance(item, dict) else None
             except FluentPetParseError:
                 event = None
-            if event is None or not isinstance(event.data, PressCreatedData):
+            if event is None or (
+                not isinstance(event.data, PressCreatedData)
+                # A press this version cannot read is passed on, so
+                # async_restore_pending warns about it by id.
+                and not (
+                    event.data is None and event.event_type is EventType.PRESS_CREATED
+                )
+            ):
                 valid = False
                 continue
             events.append(event)

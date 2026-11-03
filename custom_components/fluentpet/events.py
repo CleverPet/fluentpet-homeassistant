@@ -113,10 +113,20 @@ class FluentPetEventProcessor:
         They count as processed and fire as replayed once their entity is ready;
         a press of a button still unknown after the next refresh is dropped, as
         is a press of a button whose press entity is disabled, and a repeated id.
+        A press whose payload this version cannot read is dropped with a warning.
         """
         restored: set[str] = set()
         for event in events:
             data = event.data
+            if data is None and event.event_type is EventType.PRESS_CREATED:
+                # Stored by a version that could read it; this one cannot.
+                LOGGER.warning(
+                    "Could not read the stored waiting FluentPet press %s,"
+                    " it is ignored: %s",
+                    event.id,
+                    event.data_error,
+                )
+                continue
             if (
                 not isinstance(data, PressCreatedData)
                 or data.button is None
@@ -146,6 +156,16 @@ class FluentPetEventProcessor:
             return
         self.coordinator.async_schedule_save()
         data = event.data
+        if data is None and event.event_type is not None:
+            # A known type whose payload does not match the shape this version
+            # reads, as after a change of the event format. Say so instead of
+            # dropping it silently; a lifecycle event still refreshes below.
+            LOGGER.warning(
+                "Could not read FluentPet event %s of type %s: %s",
+                event.id,
+                event.type,
+                event.data_error,
+            )
         if isinstance(data, PressCreatedData):
             self._async_press(event, data, refresh, replayed)
         elif isinstance(data, InteractionUpdatedData):
@@ -159,7 +179,7 @@ class FluentPetEventProcessor:
                 self._async_request_refresh()
         elif event.type == EventType.PING:
             LOGGER.debug("Received webhook ping %s", event.id)
-        else:
+        elif event.event_type is None:
             LOGGER.debug("Ignoring event %s of type %s", event.id, event.type)
 
     @callback

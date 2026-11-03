@@ -17,7 +17,8 @@
     "button": {
       "id": "btn_testbuttonoutsideaaaaaaaaa",
       "name": "Outside",
-      "normalized_word": "outside"
+      "normalized_word": "outside",
+      "inaudible": false
     },
     "pusher": {
       "id": "psh_testlearneraaaaaaaaaaaaaaa",

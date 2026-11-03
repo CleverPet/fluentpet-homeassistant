@@ -448,6 +448,39 @@ async def test_stored_press_without_button_skipped(
     assert data["id"] not in processor.seen_events
 
 
+async def test_stored_unreadable_press_warns(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    mock_config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stored waiting press this version cannot read is dropped with a warning."""
+    data = load_json_fixture("events/press_created.json")
+    del data["payload"]["household"]
+    _store(
+        hass_storage,
+        mock_config_entry,
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data]},
+    )
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await setup_integration(hass, mock_config_entry)
+    processor = mock_config_entry.runtime_data.coordinator.processor
+    assert processor.pending_count == 0
+    assert _fired_presses(events) == []
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and "FluentPet press" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert data["id"] in warnings[0]
+    assert "household" in warnings[0]
+    # Not reported as a damaged store as well.
+    assert "Ignoring invalid stored waiting FluentPet presses" not in caplog.text
+
+
 async def test_disabled_press_entity_keeps_no_presses(
     hass: HomeAssistant,
     mock_client: AsyncMock,

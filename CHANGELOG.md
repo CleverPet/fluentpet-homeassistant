@@ -149,3 +149,6 @@ All notable changes to this project are documented in this file.
   read of the Buttons and learners reads them again, so Button firmware
   versions follow at that poll, about an hour later. Entity ids and unique
   ids are unchanged.
+- A FluentPet event of a known type that cannot be read is logged as a
+  warning, once per event, instead of being ignored silently; a waiting press
+  stored by an earlier version that cannot be read is logged the same way.

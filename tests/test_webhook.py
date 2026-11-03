@@ -4,6 +4,7 @@ import copy
 from dataclasses import replace
 from datetime import timedelta
 import json
+import logging
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -613,6 +614,90 @@ async def test_press_delivery_without_press_details(
     assert state.state != STATE_UNKNOWN
     assert state.attributes["press_order"] == 0
     assert state.attributes["occurred_at"] == "2026-10-17T11:59:58.412000+00:00"
+
+
+@pytest.mark.usefixtures("external_url")
+@pytest.mark.parametrize(
+    ("name", "press_order", "occurred_at", "interaction_id"),
+    [
+        (
+            "press_created",
+            0,
+            "2026-10-17T11:59:58.412000+00:00",
+            "int_testinteractionaaaaaaaaaaa",
+        ),
+        (
+            "press_created_app",
+            2,
+            "2026-10-17T12:01:10.250000+00:00",
+            "int_testinteractionappaaaaaaaa",
+        ),
+    ],
+    ids=["base", "app"],
+)
+async def test_current_press_delivery(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    name: str,
+    press_order: int,
+    occurred_at: str,
+    interaction_id: str,
+) -> None:
+    """A press in the current format, from a Base or logged in the app, fires."""
+    await setup_integration(hass, registered_entry)
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    body = _body(name)
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    await hass.async_block_till_done()
+
+    fired = [event for event in events if event.data["entity_id"] == PRESS_ENTITY]
+    assert len(fired) == 1
+    state = hass.states.get(PRESS_ENTITY)
+    assert state.state != STATE_UNKNOWN
+    assert state.attributes["press_order"] == press_order
+    assert state.attributes["occurred_at"] == occurred_at
+    assert state.attributes["interaction_id"] == interaction_id
+
+
+def _read_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the warnings about events whose payload could not be read."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.getMessage().startswith("Could not read FluentPet event")
+    ]
+
+
+@pytest.mark.usefixtures("external_url")
+async def test_unreadable_press_delivery_warns_once(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    mock_client: AsyncMock,
+    registered_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A press whose payload cannot be read is logged once and fires nothing."""
+    await setup_integration(hass, registered_entry)
+    data = json.loads(_body("press_created"))
+    del data["payload"]["household"]
+    body = json.dumps(data).encode()
+    assert await _post(hass_client_no_auth, body, signed_headers(body)) == 200
+    # The same event in another delivery is a duplicate: no second warning.
+    other_delivery = signed_headers(
+        body, delivery="00000000-0000-4000-8000-00000000d003"
+    )
+    assert await _post(hass_client_no_auth, body, other_delivery) == 200
+    await hass.async_block_till_done()
+
+    assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
+    warnings = _read_warnings(caplog)
+    assert len(warnings) == 1
+    assert data["id"] in warnings[0]
+    assert "press.created" in warnings[0]
+    assert "household" in warnings[0]
 
 
 @pytest.mark.usefixtures("external_url")

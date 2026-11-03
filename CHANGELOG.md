@@ -6,7 +6,6 @@ All notable changes to this project are documented in this file.
 
 ## 0.1.0
 
-- Repository scaffold.
 - FluentPet Connect integration (`fluentpet`), installable as a HACS custom
   integration. Requires Home Assistant 2026.10.0 or newer.
 - OAuth2 sign-in with PKCE through `auth.fluent.pet`, with the public FluentPet
@@ -160,6 +159,5 @@ All notable changes to this project are documented in this file.
   FluentPet Connect Home Assistant integration, titled
   `FluentPet Connect Home Assistant integration vX.Y.Z`, with the changelog
   section of the version as notes and a `fluentpet.zip` asset.
-- HACS installs releases: it downloads the `fluentpet.zip` asset of a
-  release and shows the release version instead of a commit. The `main`
-  branch is no longer offered in HACS. Manual installs use `fluentpet.zip`.
+- HACS installs the `fluentpet.zip` asset of a release and shows the release
+  version. Manual installs use `fluentpet.zip`.

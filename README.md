@@ -63,6 +63,7 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 
 To update, delete the `custom_components/fluentpet` folder, extract the
 `fluentpet.zip` of the new release in its place, and restart Home Assistant.
+Your configuration is kept.
 
 ## Setup
 

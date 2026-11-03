@@ -44,7 +44,8 @@ kept in two files, which must both equal `X.Y.Z` in the released commit:
    Check it locally with `.venv/bin/python script/release.py check vX.Y.Z`,
    and preview the notes with `.venv/bin/python script/release.py notes X.Y.Z`.
 2. Squash merge the release pull request into `main`, and run step 3 directly
-   after the merge.
+   after the merge, so the tag is on the release commit itself before other
+   pull requests land on `main`.
 3. Tag the merge commit with an annotated tag and push the tag:
 
    ```sh
@@ -137,8 +138,4 @@ installs releases only. `hide_default_branch` removes the `main` branch from
 the versions HACS offers, because `main` has no release asset. To test an
 unreleased change, install it manually from a checkout of the branch.
 
-The release workflow attaches `fluentpet.zip` to every release. HACS switched
-from `main` to releases with the first release, `0.1.0`: from the merge of
-its release pull request until that release was published, every HACS install
-or update of this integration failed, because HACS downloads `fluentpet.zip`
-from the release of the selected version.
+The release workflow attaches `fluentpet.zip` to every release.

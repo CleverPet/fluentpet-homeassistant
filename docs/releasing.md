@@ -93,8 +93,10 @@ uploads `fluentpet.zip` to it, and then publishes it.
 
 ### Running the workflow again
 
-To run the workflow for an existing tag, for example after a transient
-failure, open **Actions > Release > Run workflow**, choose **Use workflow
+After a transient failure, **Re-run failed jobs** on the run of the tag push
+works, because the re-run keeps the tag as its ref.
+
+To start a new run for an existing tag, open **Actions > Release > Run workflow**, choose **Use workflow
 from: Tags: vX.Y.Z**, and enter `vX.Y.Z` as the tag. The workflow refuses to
 run from a branch, so every job checks the tagged commit. It also refuses
 when a release for the tag already exists.

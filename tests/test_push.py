@@ -255,28 +255,37 @@ async def test_safety_poll_unreadable_press_warns_once(
     freezer: FrozenDateTimeFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A feed press whose payload cannot be read is logged once and fires nothing."""
+    """Unreadable feed presses fire nothing; only the first is a warning."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.fluentpet")
     await _setup_push(hass, freezer, mock_client, mock_config_entry)
     raw = load_json_fixture("events/press_created.json")
     del raw["payload"]["household"]
     unreadable = Event.from_dict(raw)
+    other = dataclasses.replace(unreadable, id="00000000-0000-4000-8000-0000000000f2")
     mock_client.async_get_events.side_effect = [
         EventPage((unreadable,), NEXT_CURSOR),
-        # The feed delivers the same event again: no second warning.
-        EventPage((unreadable,), NEXT_CURSOR),
+        # The same event again is a duplicate; another of the type is debug only.
+        EventPage((unreadable, other), NEXT_CURSOR),
     ]
     await _poll(hass, freezer)
     await _poll(hass, freezer)
     assert mock_client.async_get_events.await_count == 2
     assert hass.states.get(PRESS_ENTITY).state == STATE_UNKNOWN
-    warnings = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.getMessage().startswith("Could not read FluentPet event")
-    ]
-    assert warnings == [
+
+    def read_messages(level: int) -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == level
+            and record.getMessage().startswith("Could not read FluentPet event")
+        ]
+
+    assert read_messages(logging.WARNING) == [
         f"Could not read FluentPet event {raw['id']} of type press.created:"
+        f" {unreadable.data_error}"
+    ]
+    assert read_messages(logging.DEBUG) == [
+        f"Could not read FluentPet event {other.id} of type press.created:"
         f" {unreadable.data_error}"
     ]
 

@@ -455,30 +455,47 @@ async def test_stored_unreadable_press_warns(
     hass_storage: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A stored waiting press this version cannot read is dropped with a warning."""
+    """Stored waiting presses this version cannot read are dropped and saved away.
+
+    The first is logged as a warning, later ones at debug level.
+    """
+    caplog.set_level(logging.DEBUG, logger="custom_components.fluentpet")
     data = load_json_fixture("events/press_created.json")
     del data["payload"]["household"]
+    other = {**data, "id": "00000000-0000-4000-8000-0000000000f2"}
     _store(
         hass_storage,
         mock_config_entry,
-        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data]},
+        {"cursor": STORED_CURSOR, "event_ids": [], "pending": [data, other]},
     )
     events = async_capture_events(hass, EVENT_STATE_CHANGED)
     await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
     processor = mock_config_entry.runtime_data.coordinator.processor
     assert processor.pending_count == 0
     assert _fired_presses(events) == []
-    warnings = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-        and "FluentPet press" in record.getMessage()
-    ]
+
+    def messages(level: int) -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == level
+            and record.getMessage().startswith("Ignoring a stored waiting")
+        ]
+
+    warnings = messages(logging.WARNING)
     assert len(warnings) == 1
     assert data["id"] in warnings[0]
     assert "household" in warnings[0]
+    debug = messages(logging.DEBUG)
+    assert len(debug) == 1
+    assert other["id"] in debug[0]
     # Not reported as a damaged store as well.
     assert "Ignoring invalid stored waiting FluentPet presses" not in caplog.text
+    # Saved at setup, so the warning does not repeat on the next start.
+    stored = hass_storage[f"{DOMAIN}.{mock_config_entry.entry_id}"]["data"]
+    assert stored["pending"] == []
+    assert stored["cursor"] == STORED_CURSOR
 
 
 async def test_disabled_press_entity_keeps_no_presses(

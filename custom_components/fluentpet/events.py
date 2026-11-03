@@ -2,6 +2,7 @@
 
 from collections import OrderedDict, deque
 from collections.abc import Iterable, Iterator
+import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.const import Platform
@@ -88,6 +89,10 @@ class FluentPetEventProcessor:
         # after the event was read.
         self.last_interaction: tuple[str, InteractionUpdatedData] | None = None
         self._ready_buttons: set[str] = set()
+        # Event types with an unreadable payload already logged as a warning;
+        # later ones of that type are logged at debug level, so a catch-up read
+        # of many events does not flood the log.
+        self._unreadable_types: set[str] = set()
         # Presses (the event and its payload) for buttons without an event entity
         # yet, with the coordinator refresh count at the time they arrived. Each
         # press keeps whether it is replayed. They are stored with the feed state,
@@ -107,25 +112,32 @@ class FluentPetEventProcessor:
         return [event for _, presses in self._pending.values() for event, *_ in presses]
 
     @callback
-    def async_restore_pending(self, events: Iterable[Event]) -> None:
+    def async_restore_pending(self, events: Iterable[Event]) -> bool:
         """Queue stored presses again that waited for their button entity.
 
         They count as processed and fire as replayed once their entity is ready;
         a press of a button still unknown after the next refresh is dropped, as
         is a press of a button whose press entity is disabled, and a repeated id.
-        A press whose payload this version cannot read is dropped with a warning.
+        A press whose payload this version cannot read is dropped: the first is
+        logged as a warning, later ones at debug level.
+
+        Returns whether a press that this version cannot read was dropped, so
+        the caller saves the store without it.
         """
         restored: set[str] = set()
+        dropped = False
         for event in events:
             data = event.data
             if data is None and event.event_type is EventType.PRESS_CREATED:
                 # Stored by a version that could read it; this one cannot.
-                LOGGER.warning(
-                    "Could not read the stored waiting FluentPet press %s,"
-                    " it is ignored: %s",
+                LOGGER.log(
+                    logging.DEBUG if dropped else logging.WARNING,
+                    "Ignoring a stored waiting FluentPet press %s that this version"
+                    " cannot read: %s",
                     event.id,
                     event.data_error,
                 )
+                dropped = True
                 continue
             if (
                 not isinstance(data, PressCreatedData)
@@ -138,6 +150,7 @@ class FluentPetEventProcessor:
             self._async_queue(
                 data.button.id, event, data, self.coordinator.refresh_count, True
             )
+        return dropped
 
     @callback
     def async_process(
@@ -159,8 +172,12 @@ class FluentPetEventProcessor:
         if data is None and event.event_type is not None:
             # A known type whose payload does not match the shape this version
             # reads, as after a change of the event format. Say so instead of
-            # dropping it silently; a lifecycle event still refreshes below.
-            LOGGER.warning(
+            # dropping it silently: a warning for the first of each type, debug
+            # for later ones. A lifecycle event still refreshes below.
+            first = event.type not in self._unreadable_types
+            self._unreadable_types.add(event.type)
+            LOGGER.log(
+                logging.WARNING if first else logging.DEBUG,
                 "Could not read FluentPet event %s of type %s: %s",
                 event.id,
                 event.type,

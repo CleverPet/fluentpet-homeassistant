@@ -127,6 +127,20 @@ def test_press_created_app() -> None:
     assert data.position == 2
 
 
+@pytest.mark.parametrize("name", ["press_created", "press_created_app"])
+def test_press_created_current_shape(name: str) -> None:
+    """The current fixtures keep the final format, not the earlier one.
+
+    The press has no occurred_at or press_order, and the version is on the
+    envelope, not in the payload, so a fixture edit cannot restore the old shape.
+    """
+    raw = load_json_fixture(f"events/{name}.json")
+    assert "occurred_at" not in raw["payload"]["press"]
+    assert "press_order" not in raw["payload"]["press"]
+    assert "version" in raw
+    assert "version" not in raw["payload"]
+
+
 def test_press_created_without_position() -> None:
     """An interaction without a position has position None."""
     raw = load_json_fixture("events/press_created.json")

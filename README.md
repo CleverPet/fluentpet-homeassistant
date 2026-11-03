@@ -53,13 +53,16 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 
 ### Manual
 
-1. Download the source archive of the latest
-   [release](https://github.com/CleverPet/fluentpet-homeassistant/releases),
-   or, before the first release, of `main` (**Code > Download ZIP**), and
-   extract it.
-2. Copy its `custom_components/fluentpet` folder into the `custom_components`
-   folder (create it if missing) of your Home Assistant configuration folder.
+1. Download `fluentpet.zip` from the latest
+   [release](https://github.com/CleverPet/fluentpet-homeassistant/releases).
+2. In the `custom_components` folder (create it if missing) of your Home
+   Assistant configuration folder, create a `fluentpet` folder and extract
+   `fluentpet.zip` into it, so that `manifest.json` is at
+   `custom_components/fluentpet/manifest.json`.
 3. Restart Home Assistant.
+
+To update, delete the `custom_components/fluentpet` folder, extract the
+`fluentpet.zip` of the new release in its place, and restart Home Assistant.
 
 ## Setup
 

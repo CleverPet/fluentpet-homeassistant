@@ -39,17 +39,12 @@ kept in two files, which must both equal `X.Y.Z` in the released commit:
    - moves the entries under `## Unreleased` in `CHANGELOG.md` to a new
      `## X.Y.Z` section below it, and leaves `## Unreleased` in place, empty;
    - sets `version` in `custom_components/fluentpet/manifest.json` and in
-     `pyproject.toml` to `X.Y.Z`;
-   - for the first release (`0.1.0`) only, also switches HACS to releases in
-     `hacs.json` and `README.md`, as described in [HACS](#hacs).
+     `pyproject.toml` to `X.Y.Z`.
 
    Check it locally with `.venv/bin/python script/release.py check vX.Y.Z`,
    and preview the notes with `.venv/bin/python script/release.py notes X.Y.Z`.
-2. Squash merge the release pull request into `main`.
-
-   For the first release, which sets `zip_release` in `hacs.json`, run step 3
-   directly after the merge. From that merge until the release is published,
-   every HACS install or update of this integration fails.
+2. Squash merge the release pull request into `main`, and run step 3 directly
+   after the merge.
 3. Tag the merge commit with an annotated tag and push the tag:
 
    ```sh
@@ -134,20 +129,16 @@ version instead.
 
 ## HACS
 
-The release workflow attaches `fluentpet.zip` to every release. HACS installs
-from `main` until `hacs.json` sets `"zip_release": true`,
-`"filename": "fluentpet.zip"` and `"hide_default_branch": true`.
-
-The first release pull request (`0.1.0`) sets those keys in `hacs.json` and
-changes the manual install in `README.md` to `fluentpet.zip`. HACS then
-switches from `main` to releases in the same merge that the tag follows. The
-keys are not set earlier: with `zip_release`, HACS downloads `fluentpet.zip`
-from the release of the selected version, so without a release every install
-fails.
-
-Once the keys are set, HACS installs the `fluentpet.zip` asset of a release
-and extracts it into `custom_components/fluentpet`. It shows the tag of the
-latest release as the version, installs that release by default, and installs
-releases only. `hide_default_branch` removes the `main` branch from the
-versions HACS offers, because `main` has no release asset. To test an
+`hacs.json` sets `"zip_release": true`, `"filename": "fluentpet.zip"` and
+`"hide_default_branch": true`. HACS installs the `fluentpet.zip` asset of a
+release and extracts it into `custom_components/fluentpet`. It shows the tag of
+the latest release as the version, installs that release by default, and
+installs releases only. `hide_default_branch` removes the `main` branch from
+the versions HACS offers, because `main` has no release asset. To test an
 unreleased change, install it manually from a checkout of the branch.
+
+The release workflow attaches `fluentpet.zip` to every release. HACS switched
+from `main` to releases with the first release, `0.1.0`: from the merge of
+its release pull request until that release was published, every HACS install
+or update of this integration failed, because HACS downloads `fluentpet.zip`
+from the release of the selected version.

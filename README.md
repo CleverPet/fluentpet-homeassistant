@@ -46,9 +46,9 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 The FluentPet Connect icon ships with the integration and appears under
 **Settings > Devices & services** once you have installed the integration and
 restarted Home Assistant. The HACS 2.0.5 dashboard and its updates under
-**Settings > Updates** show a placeholder icon. The Marketplace integration in
-Home Assistant 2026.11 and newer shows the FluentPet Connect icon once the
-integration is installed.
+**Settings > Updates** show a placeholder icon. In Home Assistant 2026.11 and
+newer, HACS is built in as the Marketplace integration, which shows the
+FluentPet Connect icon once the integration is installed.
 
 ### HACS
 

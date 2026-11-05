@@ -11,8 +11,8 @@ All notable changes to this project are documented in this file.
   Assistant Marketplace catalog reads on Home Assistant 2026.11 or newer.
 - Documentation: presses reach Home Assistant within seconds when the Base is
   plugged in and runs firmware 1.1.0 or newer; a Base on battery reports
-  presses in batches, minutes later. New troubleshooting entry, "Presses
-  arrive minutes late".
+  presses in batches, minutes later. New troubleshooting entry for presses
+  that arrive minutes late, in batches.
 
 ## 0.1.0
 

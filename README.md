@@ -41,7 +41,7 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
   at the refresh interval.
 - Recommended for instant presses, with push updates: a Base that is plugged
   in and runs firmware 1.1.0 or newer (1.1.1 or newer to also get repeat
-  presses of the same Button), which reports each press within seconds. A
+  presses of the same Button), which reports presses within seconds. A
   Base on battery reports presses in batches, so the press event can lag by
   minutes.
 

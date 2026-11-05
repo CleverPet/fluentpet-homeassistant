@@ -25,15 +25,17 @@ Check that:
 - **Settings > System > Network** has an external URL starting with
   `https://` that is reachable from the internet.
 
-Then reload the integration. The diagnostics show whether the webhook is
-active (`webhook.active`).
+Then reload the integration and check `webhook.active` again.
 
 **Presses arrive minutes late, in batches, while the webhook is active.**
 FluentPet has a press only once the Base reports it. A Base on battery
 reports presses only when it wakes, so the press event can lag by minutes.
-A Base reports each press as it happens only when it is plugged in and runs
+A Base reports presses as they happen only when it is plugged in and runs
 firmware 1.1.0 or newer. Check the Base device: its Power sensor shows
-whether it is plugged in, and its device page shows the firmware version.
+whether it is plugged in, and its device page shows the firmware version
+(empty while FluentPet has no report yet, or when the build is not a
+published release; see
+[Devices and entities](entities.md#devices-and-entities)).
 Plug the Base in and update it to firmware 1.1.0 or newer (1.1.1 or newer to
 also get repeat presses of the same Button), and presses reach Home
 Assistant within seconds. See

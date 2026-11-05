@@ -29,7 +29,8 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
 ## Requirements
 
 - Home Assistant 2026.10.0 or newer.
-- [HACS](https://hacs.xyz), to install through HACS.
+- To install from the catalog: the Home Assistant Marketplace (Home Assistant
+  2026.11 or newer), or [HACS](https://hacs.xyz) on Home Assistant 2026.10.
 - A FluentPet account that is the admin of the household. The FluentPet API
   serves the event feed and webhooks to the household admin only, so setup
   refuses accounts that are not the admin.
@@ -37,16 +38,33 @@ Supported devices: the FluentPet Connect Base and FluentPet Connect Buttons.
   an external URL for Home Assistant that starts with `https://` and is
   reachable from the internet. Without either, the integration polls FluentPet
   at the refresh interval.
+- Recommended for instant presses: a Base that is plugged in and runs firmware
+  1.1.0 or newer, which reports each press within seconds. A Base on battery
+  reports presses in batches, so the press event can lag by minutes.
 
 ## Installation
 
+### Home Assistant Marketplace
+
+On Home Assistant 2026.11 or newer:
+
+1. Go to **Settings > Marketplace**. The first time, accept the notice with
+   **I understand the risks and agree**.
+2. Search for **FluentPet Connect** and open it.
+3. Select **Install**, check the version, and select **Install** again. The
+   setup of the integration opens when the installation is complete; see
+   [Add the integration](#add-the-integration).
+
 ### HACS
 
-1. In HACS, open the menu in the top right and choose **Custom repositories**.
-2. Add `https://github.com/CleverPet/fluentpet-homeassistant` with type
-   **Integration**.
-3. Search for **FluentPet Connect** in HACS, download it, and restart Home
+On Home Assistant 2026.10, with [HACS](https://hacs.xyz) installed:
+
+1. Search for **FluentPet Connect** in HACS, download it, and restart Home
    Assistant.
+2. If HACS does not list it, open the menu in the top right, choose
+   **Custom repositories**, add
+   `https://github.com/CleverPet/fluentpet-homeassistant` with type
+   **Integration**, and repeat step 1.
 
 ### Manual
 
@@ -138,9 +156,11 @@ presses, repair issues and unavailable sensors, see
 
 1. Go to **Settings > Devices & services > FluentPet Connect**, open the menu
    of each household entry and choose **Delete**.
-2. In HACS, open **FluentPet Connect**, choose **Remove**, and restart Home
-   Assistant. For a manual installation, delete the
-   `custom_components/fluentpet` folder and restart Home Assistant.
+2. In **Settings > Marketplace**, open **FluentPet Connect**, open the menu
+   in the top right and choose **Uninstall**, then restart Home Assistant
+   when a repair asks you to. With HACS, open **FluentPet Connect**, choose
+   **Remove**, and restart Home Assistant. For a manual installation, delete
+   the `custom_components/fluentpet` folder and restart Home Assistant.
 3. Optional: under **Settings > Devices & services > Application
    credentials**, remove the credential named **FluentPet**, and any other
    credential you added for FluentPet Connect.

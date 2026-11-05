@@ -57,6 +57,18 @@ Every delivery is checked before it is processed:
   retry) is answered but not processed: the feed, read at every refresh, has
   processed that event already, or reads it from its stored position.
 
+### How fast presses arrive
+
+FluentPet has a press only once the Base reports it, so the webhook can
+deliver a press no sooner than that. Presses reach Home Assistant within
+seconds when the Base is plugged in and runs firmware 1.1.0 or newer: it
+stays connected and reports each press as it happens. Firmware 1.1.1 and
+newer also reports repeat presses of the same Button. A Base on battery
+wakes, reports and sleeps again, so it reports presses in batches and the
+press event can lag by minutes. The Base device shows both: its Power sensor
+is `on` while it runs plugged in, and its device page shows the firmware
+version.
+
 ## Push first, polling as fallback
 
 The integration works in one of two modes:

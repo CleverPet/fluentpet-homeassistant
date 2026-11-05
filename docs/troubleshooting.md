@@ -26,6 +26,15 @@ event feed at the refresh interval. Check that:
 Then reload the integration. The diagnostics show whether the webhook is
 active (`webhook.active`).
 
+**Presses arrive minutes late.** With the webhook active, presses arrive in
+batches when the Base runs on battery or on firmware older than 1.1.0. A Base
+on battery reports presses only when it wakes, so the press event can lag by
+minutes. Check the Base device: its Power sensor shows whether it is plugged
+in, and its device page shows the firmware version. Plug the Base in and
+update it to firmware 1.1.0 or newer, and presses reach Home Assistant within
+seconds. See
+[How fast presses arrive](how-data-updates.md#how-fast-presses-arrive).
+
 **A repair issue says the FluentPet webhook is disabled.** See
 [Disabled webhook](how-data-updates.md#disabled-webhook).
 
@@ -135,9 +144,11 @@ normalized words and audio ids of Buttons; serial numbers; and email addresses.
    of each household entry and choose **Delete**. This deletes the FluentPet
    webhook endpoint of the household, the Home Assistant Cloud cloudhook, the
    repair issues and the stored feed position.
-2. In HACS, open **FluentPet Connect**, choose **Remove**, and restart Home
-   Assistant. For a manual installation, delete the
-   `custom_components/fluentpet` folder and restart Home Assistant.
+2. In **Settings > Marketplace**, open **FluentPet Connect**, open the menu
+   in the top right and choose **Uninstall**, then restart Home Assistant
+   when a repair asks you to. With HACS, open **FluentPet Connect**, choose
+   **Remove**, and restart Home Assistant. For a manual installation, delete
+   the `custom_components/fluentpet` folder and restart Home Assistant.
 3. Optional: under **Settings > Devices & services > Application
    credentials**, remove the credential named **FluentPet**, and any other
    credential you added for FluentPet Connect.

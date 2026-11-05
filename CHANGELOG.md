@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.1 (2026-11-05)
+## Unreleased
+
+## 0.1.1
 
 - Install from the Home Assistant Marketplace on Home Assistant 2026.11 or
   newer, or from the HACS default list on 2026.10. The HACS custom repository

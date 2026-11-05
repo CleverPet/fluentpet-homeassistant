@@ -66,12 +66,12 @@ connected and reports presses as they happen. Firmware 1.1.1 or newer also
 reports repeat presses of the same Button as they happen. A Base on battery
 wakes, reports and sleeps again, so it reports presses in batches and the
 press event can lag by minutes. A press that arrives in a batch keeps the time
-it happened in its `occurred_at` attribute; see
-[Press event entity](entities.md#press-event-entity). The Base device shows
-both: its Power sensor is `on` while it runs plugged in, and its device page
-shows the firmware version (empty while FluentPet has no report yet, or when the build is not a
-published release; see
-[Devices and entities](entities.md#devices-and-entities)).
+it happened in its `occurred_at` attribute; see [Press event
+entity](entities.md#press-event-entity). The Base device shows both: its Power
+sensor is `on` while it runs plugged in, and its device page shows the
+firmware version (empty while FluentPet has no report yet, or when the build
+is not a published release; see [Devices and
+entities](entities.md#devices-and-entities)).
 
 ## Push first, polling as fallback
 

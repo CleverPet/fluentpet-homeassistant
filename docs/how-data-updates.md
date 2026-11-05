@@ -57,15 +57,32 @@ Every delivery is checked before it is processed:
   retry) is answered but not processed: the feed, read at every refresh, has
   processed that event already, or reads it from its stored position.
 
+### How fast presses arrive
+
+FluentPet has a press only once the Base reports it, so the webhook can
+deliver a press no sooner than that. Presses reach Home Assistant within
+seconds when the Base is plugged in and runs firmware 1.1.0 or newer: it stays
+connected and reports presses as they happen. Firmware 1.1.1 or newer also
+reports repeat presses of the same Button as they happen. A Base on battery
+wakes, reports and sleeps again, so it reports presses in batches and the
+press event can lag by minutes. A press that arrives in a batch keeps the time
+it happened in its `occurred_at` attribute; see [Press event
+entity](entities.md#press-event-entity). The Base device shows both: its Power
+sensor is `on` while it runs plugged in, and its device page shows the
+firmware version (empty while FluentPet has no report yet, or when the build
+is not a published release; see [Devices and
+entities](entities.md#devices-and-entities)).
+
 ## Push first, polling as fallback
 
 The integration works in one of two modes:
 
-- **Push.** Events arrive within seconds through the webhook. A safety poll
-  every 5 minutes reads the event feed, to catch up events the webhook missed
-  and keep the stored feed position current, and then the Bases, for their
-  last seen time, power mode and battery level: two requests, plus the
-  webhook check every 5 minutes.
+- **Push.** Events arrive through the webhook as soon as FluentPet has them
+  (for presses, see [How fast presses arrive](#how-fast-presses-arrive)). A
+  safety poll every 5 minutes reads the event feed, to catch up events the
+  webhook missed and keep the stored feed position current, and then the
+  Bases, for their last seen time, power mode and battery level: two requests,
+  plus the webhook check every 5 minutes.
   Buttons and learners (two more requests) are read after their events (see
   [Bases and Buttons](#bases-and-buttons)), when a Base reports another
   firmware version, and at the safety poll an hour after their last read,
@@ -97,8 +114,9 @@ arrive: the safety poll's feed read catches up any event the webhook missed.
 ## Event feed
 
 The household event feed is read at every refresh, in both modes. With push,
-presses arrive within seconds and the feed read keeps the stored feed
-position current; while polling, the feed read is how presses arrive.
+presses arrive as soon as the Base reports them and the feed read keeps the
+stored feed position current; while polling, the feed read is how presses
+arrive.
 
 Events read from the feed are applied only when the whole refresh succeeds,
 and the stored position moves only then. A refresh that fails part way reads

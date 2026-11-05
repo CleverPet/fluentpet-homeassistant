@@ -5,10 +5,10 @@ All notable changes to this project are documented in this file.
 ## Unreleased
 
 - Install from the Home Assistant Marketplace on Home Assistant 2026.11 or
-  newer, or from the HACS default list on 2026.10. The README now leads with
-  these steps, with the HACS custom repository as a fallback.
-- The manifest lists the integration under the `pets` category, which the
-  Marketplace shows on Home Assistant 2026.11 or newer.
+  newer, or from the HACS default list on 2026.10. The HACS custom repository
+  remains as a fallback.
+- The manifest declares the `pets` integration category, which the Home
+  Assistant Marketplace catalog reads on Home Assistant 2026.11 or newer.
 - Documentation: presses reach Home Assistant within seconds when the Base is
   plugged in and runs firmware 1.1.0 or newer; a Base on battery reports
   presses in batches, minutes later. New troubleshooting entry, "Presses
